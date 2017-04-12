@@ -75,8 +75,8 @@ private:
     VectorXd x_ = VectorXd::Zero(5);
     
     // state covariance matrix
-    MatrixXd P_ = MatrixXd::Zero(5, 5);
-    
+    MatrixXd P_ = 2*MatrixXd::Identity(5, 5);
+
     // predicted sigma points matrix
     MatrixXd Xsig_pred_;
     
@@ -116,7 +116,7 @@ private:
     VectorXd weights_ = VectorXd::Zero(2*n_aug_+1);
     
     // Sigma point spreading parameter
-    const double lambda_ = 3+n_x_;
+    const double lambda_ = 3-n_x_, lambda_aug_ = 3-n_aug_;
 
     // the current NIS for radar
     double NIS_radar_;
