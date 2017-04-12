@@ -6,8 +6,8 @@
 
 namespace {
     double clip_angle(double d) {
-        while (d> M_PI) d-=2.*M_PI;
-        while (d<-M_PI) d+=2.*M_PI;
+        while (d> M_PI) d-=2*M_PI;
+        while (d<-M_PI) d+=2*M_PI;
         return d;
     }
 
@@ -48,7 +48,7 @@ UKF::UKF() {
  */
 void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
     if (meas_package.sensor_type_ != MeasurementPackage::RADAR) {
-        return;
+        //return;
     }
 
     if (!is_initialized_) {
@@ -78,7 +78,7 @@ void UKF::init(const MeasurementPackage &meas_package) {
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
         // Convert radar from polar to cartesian coordinates and initialize state.
         const double rho     = meas_package.raw_measurements_[0];
-        const double phi     = meas_package.raw_measurements_[1];
+        const double phi     = clip_angle(meas_package.raw_measurements_[1]);
         const double rho_dot = meas_package.raw_measurements_[2];
         const double px      = cos(phi)*rho, py = sin(phi)*rho;
         is_phi_initialized_  = rho > 0.0001; // for zero position we have no initial info about the angle
@@ -97,7 +97,7 @@ void UKF::init(const MeasurementPackage &meas_package) {
  */
 void UKF::Prediction(const double dt) {
     Xsig_pred_ = PredictSigmaPoints(dt);
-    x_         = WeightedMean(Xsig_pred_);
+    x_         = clip_angle(WeightedMean(Xsig_pred_), {3,4});
     P_         = PredictP(x_, Xsig_pred_);
 }
 
@@ -165,8 +165,8 @@ MatrixXd UKF::AugmentedSigmaPoints() {
     MatrixXd Xsig_aug = MatrixXd(n_aug_, 2*n_aug_+1);
     Xsig_aug.col(0)   = x_aug;
     for (int i=0; i<n_aug_; ++i) {
-        Xsig_aug.col(i+1       ) = x_aug+k*A.col(i);
-        Xsig_aug.col(i+1+n_aug_) = x_aug-k*A.col(i);
+        Xsig_aug.col(i+1       ) = clip_angle(x_aug+k*A.col(i), {3,4});
+        Xsig_aug.col(i+1+n_aug_) = clip_angle(x_aug-k*A.col(i), {3,4});
     }
 
     return Xsig_aug;
@@ -182,8 +182,8 @@ MatrixXd UKF::PredictSigmaPoints(const double dt) {
         const VectorXd &x = Xsig_aug.col(c); // one augmented point. 7 rows
         VectorXd     y    = x.head(n_x_);    // one predicted point. 5 rows
         const double v    = x(2);
-        const double yaw  = x(3);
-        const double yawd = x(4);
+        const double yaw  = clip_angle(x(3));
+        const double yawd = clip_angle(x(4));
         const double nu   = x(5);
         const double nu2  = x(6);
         if (fabs(yawd) < 0.00001) {
@@ -235,9 +235,9 @@ MatrixXd UKF::PredictRadarMeasurementSigmaPoints(const MatrixXd &Xsig_pred) {
         const double v   = Xsig_pred(2,i);
         const double k   = Xsig_pred(3,i);
         const double rho = sqrt(px*px+py*py);
-        Zsig(0,i) = rho;
-        Zsig(1,i) = atan2(py, px);
-        Zsig(2,i) = rho>0.000001 ? (px*cos(k)*v+py*sin(k)*v)/rho : 0;
+        Zsig(0,i)        = rho;
+        Zsig(1,i)        = atan2(py, px);
+        Zsig(2,i)        = rho>0.000001 ? (px*cos(k)*v+py*sin(k)*v)/rho : 0;
     }
     return Zsig;
 }
@@ -245,7 +245,7 @@ MatrixXd UKF::PredictRadarMeasurementSigmaPoints(const MatrixXd &Xsig_pred) {
 MatrixXd UKF::RadarMeasurementCovarianceS(const VectorXd &z_pred, const MatrixXd &Zsig) {
     MatrixXd S = R_radar_;
     for (int i=0; i < 2*n_aug_+1; ++i) {
-        const VectorXd v = Zsig.col(i)-z_pred;
+        const VectorXd v = clip_angle(Zsig.col(i)-z_pred, {1});
         S += weights_(i)*v*v.transpose();
     }
     return S;
