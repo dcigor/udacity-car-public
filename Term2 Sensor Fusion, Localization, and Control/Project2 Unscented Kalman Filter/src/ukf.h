@@ -45,6 +45,7 @@ private:
      */
     void UpdateRadar(const MeasurementPackage &meas_package);
     
+    VectorXd MakeX(const MeasurementPackage &meas_package) const;
     MatrixXd AugmentedSigmaPoints();
     MatrixXd PredictSigmaPoints(double dt);
     VectorXd WeightedMean(const MatrixXd &sig_points);
@@ -55,7 +56,7 @@ private:
     MatrixXd RadarTc(const VectorXd &x, const MatrixXd &Xsig_pred, const VectorXd &z_pred, const MatrixXd &Zsig);
 
     // initially set to false, set to true in first call of ProcessMeasurement
-    bool is_initialized_ = false, is_phi_initialized_ = false;
+    bool is_initialized_ = false, is_predicted_ = false;
     
     // state vector: [pos1 pos2 vel_abs yaw_angle yaw_rate] in SI units and rad
     VectorXd x_ = VectorXd::Zero(5);
