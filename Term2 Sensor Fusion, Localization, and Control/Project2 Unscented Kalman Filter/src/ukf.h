@@ -75,7 +75,7 @@ private:
     VectorXd x_ = VectorXd::Zero(5);
     
     // state covariance matrix
-    MatrixXd P_ = 2*MatrixXd::Identity(5, 5);
+    MatrixXd P_ = MatrixXd::Identity(5, 5);
 
     // predicted sigma points matrix
     MatrixXd Xsig_pred_;
@@ -90,16 +90,16 @@ private:
     const int n_aug_ = 7;
 
     // Process noise standard deviation longitudinal acceleration in m/s^2
-    const double std_a_ = 1;
+    const double std_a_ = 0.5;
     
     // Process noise standard deviation yaw acceleration in rad/s^2
-    const double std_yawdd_ = 0.7;
+    const double std_yawdd_ = 2;
     
     // Laser measurement noise standard deviation position1 in m
     const double std_laspx_ = 0.1;
     
     // Laser measurement noise standard deviation position2 in m
-    const double std_laspy_ = 0.1;
+    const double std_laspy_ = std_laspx_;
     
     // Radar measurement noise standard deviation radius in m
     const double std_radr_ = 0.3;
@@ -108,30 +108,30 @@ private:
     const double std_radphi_ = 0.03;
     
     // Radar measurement noise standard deviation radius change in m/s
-    const double std_radrd_ = 0.3;
-    
+    const double std_radrd_ = 0.6;
+
     MatrixXd radar_R_ = MatrixXd::Zero(3,3);
 
     // Weights of sigma points
     VectorXd weights_ = VectorXd::Zero(2*n_aug_+1);
-    
+
     // Sigma point spreading parameter
     const double lambda_ = 3-n_x_, lambda_aug_ = 3-n_aug_;
 
     // the current NIS for radar
     double NIS_radar_;
-    
+
     // the current NIS for laser
     double NIS_laser_;
-    
+
     long previous_timestamp_ = 0;
-    
+
     // laser
     const Eigen::MatrixXd I_ = Eigen::MatrixXd::Identity(5, 5);
 
     // measurement matrix
     Eigen::MatrixXd H_laser_ = Eigen::MatrixXd(2, 5), Ht_laser_;
-    
+
     Eigen::MatrixXd R_laser_ = Eigen::MatrixXd(2, 2);
 };
 
