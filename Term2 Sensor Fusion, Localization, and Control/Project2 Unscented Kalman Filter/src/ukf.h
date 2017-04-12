@@ -13,22 +13,18 @@ using Eigen::VectorXd;
 
 class UKF {
 public:
-  /**
-   * Constructor
-   */
-  UKF();
+    UKF();
 
-    
+    // public accessors to the members
     const VectorXd &x() const {return x_;}
     double NIS_laser () const {return NIS_laser_;}
     double NIS_radar () const {return NIS_radar_;}
     
     /**
-   * ProcessMeasurement
-   * @param meas_package The latest measurement data of either radar or laser
-   */
-  void ProcessMeasurement(const MeasurementPackage &meas_package);
-
+     * ProcessMeasurement
+     * @param meas_package The latest measurement data of either radar or laser
+     */
+    void ProcessMeasurement(const MeasurementPackage &meas_package);
 private:
     void init(const MeasurementPackage &meas_package);
     
@@ -38,38 +34,30 @@ private:
      * @param delta_t Time between k and k+1 in s
      */
     void Prediction(double delta_t);
-    
+
     /**
      * Updates the state and the state covariance matrix using a laser measurement
      * @param meas_package The measurement at k+1
      */
     void UpdateLidar(const MeasurementPackage &meas_package);
-    
+
     /**
      * Updates the state and the state covariance matrix using a radar measurement
      * @param meas_package The measurement at k+1
      */
     void UpdateRadar(const MeasurementPackage &meas_package);
     
-    MatrixXd GenerateSigmaPoints ();
     MatrixXd AugmentedSigmaPoints();
     MatrixXd PredictSigmaPoints(double dt);
-    VectorXd PredictStateMean(const MatrixXd &Xsig_pred);
+    VectorXd WeightedMean(const MatrixXd &sig_points);
     MatrixXd PredictP(const VectorXd &x, const MatrixXd &Xsig_pred);
 
     MatrixXd PredictRadarMeasurementSigmaPoints(const MatrixXd &Xsig_pred);
-    VectorXd PredictRadarMeasurementMean(const MatrixXd &Zsig);
     MatrixXd RadarMeasurementCovarianceS(const VectorXd &z_pred, const MatrixXd &Zsig);
     MatrixXd RadarTc(const VectorXd &x, const MatrixXd &Xsig_pred, const VectorXd &z_pred, const MatrixXd &Zsig);
 
     // initially set to false, set to true in first call of ProcessMeasurement
     bool is_initialized_ = false;
-    
-    // if this is false, laser measurements will be ignored (except for init)
-    bool use_laser_ = true;
-    
-    // if this is false, radar measurements will be ignored (except for init)
-    bool use_radar_ = true;
     
     // state vector: [pos1 pos2 vel_abs yaw_angle yaw_rate] in SI units and rad
     VectorXd x_ = VectorXd::Zero(5);
@@ -79,10 +67,7 @@ private:
 
     // predicted sigma points matrix
     MatrixXd Xsig_pred_;
-    
-    // time when the state is true, in us
-    long long time_us_;
-    
+
     // State dimension
     const int n_x_ = 5;
     
@@ -95,11 +80,8 @@ private:
     // Process noise standard deviation yaw acceleration in rad/s^2
     const double std_yawdd_ = 2;
     
-    // Laser measurement noise standard deviation position1 in m
-    const double std_laspx_ = 0.1;
-    
-    // Laser measurement noise standard deviation position2 in m
-    const double std_laspy_ = std_laspx_;
+    // Laser measurement noise standard deviation px and py in m
+    const double std_laspx_ = 0.1, std_laspy_ = std_laspx_;
     
     // Radar measurement noise standard deviation radius in m
     const double std_radr_ = 0.3;
@@ -128,11 +110,8 @@ private:
 
     // laser
     const Eigen::MatrixXd I_ = Eigen::MatrixXd::Identity(5, 5);
-
-    // measurement matrix
-    Eigen::MatrixXd H_laser_ = Eigen::MatrixXd(2, 5), Ht_laser_;
-
-    Eigen::MatrixXd R_laser_ = Eigen::MatrixXd(2, 2);
+    Eigen::MatrixXd H_laser_ = Eigen::MatrixXd(2, 5), Ht_laser_; // measurement matrix
+    Eigen::MatrixXd R_laser_ = Eigen::MatrixXd(2, 2); // measurement covariance
 };
 
 #endif /* UKF_H */
