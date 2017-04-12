@@ -4,8 +4,6 @@
 #include "measurement_package.h"
 #include "Eigen/Dense"
 #include <vector>
-#include <string>
-#include <fstream>
 #include "tools.h"
 
 using Eigen::MatrixXd;
@@ -68,29 +66,8 @@ private:
     // predicted sigma points matrix
     MatrixXd Xsig_pred_;
 
-    // State dimension
-    const int n_x_ = 5;
-    
-    // Augmented state dimension
-    const int n_aug_ = 7;
-
-    // Process noise standard deviation longitudinal acceleration in m/s^2
-    const double std_a_ = 0.5;
-    
-    // Process noise standard deviation yaw acceleration in rad/s^2
-    const double std_yawdd_ = 2;
-    
-    // Laser measurement noise standard deviation px and py in m
-    const double std_laspx_ = 0.1, std_laspy_ = std_laspx_;
-    
-    // Radar measurement noise standard deviation radius in m
-    const double std_radr_ = 0.3;
-    
-    // Radar measurement noise standard deviation angle in rad
-    const double std_radphi_ = 0.03;
-    
-    // Radar measurement noise standard deviation radius change in m/s
-    const double std_radrd_ = 0.6;
+    // State dimension & Augmented state dimension
+    const int n_x_ = 5, n_aug_ = 7;
 
     MatrixXd radar_R_ = MatrixXd::Zero(3,3);
 
@@ -100,18 +77,31 @@ private:
     // Sigma point spreading parameter
     const double lambda_ = 3-n_x_, lambda_aug_ = 3-n_aug_;
 
-    // the current NIS for radar
-    double NIS_radar_;
-
-    // the current NIS for laser
-    double NIS_laser_;
+    // the current NIS for radar and laser
+    double NIS_radar_ = 0, NIS_laser_ = 0;
 
     long previous_timestamp_ = 0;
 
+    // process noise: needs tuning
+    // Process noise standard deviation longitudinal acceleration in m/s^2
+    const double std_a_ = 0.5;
+    // Process noise standard deviation yaw acceleration in rad/s^2
+    const double std_yawdd_ = 2;
+
+    // measurement noise: provided by the device manufacturer. do not change
+    // Laser measurement noise standard deviation px and py in m
+    const double std_laspx_ = 0.15, std_laspy_ = std_laspx_;
+    // Radar measurement noise standard deviation radius in m
+    const double std_radr_ = 0.3;
+    // Radar measurement noise standard deviation angle in rad
+    const double std_radphi_ = 0.03;
+    // Radar measurement noise standard deviation radius change in m/s
+    const double std_radrd_ = 0.3;
+
     // laser
-    const Eigen::MatrixXd I_ = Eigen::MatrixXd::Identity(5, 5);
-    Eigen::MatrixXd H_laser_ = Eigen::MatrixXd(2, 5), Ht_laser_; // measurement matrix
-    Eigen::MatrixXd R_laser_ = Eigen::MatrixXd(2, 2); // measurement covariance
+    const MatrixXd I_ = MatrixXd::Identity(5, 5);
+    MatrixXd H_laser_ = MatrixXd(2, 5), Ht_laser_; // measurement matrix
+    MatrixXd R_laser_ = MatrixXd(2, 2); // measurement covariance
 };
 
 #endif /* UKF_H */
