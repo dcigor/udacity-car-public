@@ -29,6 +29,15 @@ UKF::UKF() {
     radar_R_(0,0) = std_radr_  *std_radr_;
     radar_R_(1,1) = std_radphi_*std_radphi_;
     radar_R_(2,2) = std_radrd_ *std_radrd_;
+    
+    //laser measurement matrix
+    H_laser_ << 1, 0, 0, 0, 0,
+                0, 1, 0, 0, 0;
+    Ht_laser_ = H_laser_.transpose();
+    
+    //measurement covariance matrix - laser
+    R_laser_ << std_laspx_, 0,
+                0, std_laspy_;
 }
 
 /**
@@ -48,18 +57,18 @@ void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
     }
 
     // for small time increments: fallback to the smallest possible time increment
-    const double dt = std::max(0.000001, (meas_package.timestamp_ - previous_timestamp_) / 1000000.0);
+    const double dt = (meas_package.timestamp_ - previous_timestamp_) / 1000000.0;
 
-    //Prediction(dt);
+    if (dt > 0.00001) {
+        Prediction(dt);
+        previous_timestamp_ = meas_package.timestamp_;
+    }
 
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
-        Prediction(dt);
         UpdateRadar(meas_package);
     }   else {
-        return;
-        //UpdateLidar(meas_package);
+        UpdateLidar(meas_package);
     }
-    previous_timestamp_ = meas_package.timestamp_;
 }
 
 void UKF::init(const MeasurementPackage &meas_package) {
@@ -116,6 +125,14 @@ void UKF::UpdateLidar(const MeasurementPackage &meas_package) {
 
   You'll also need to calculate the lidar NIS.
   */
+    //update the state by using Kalman Filter equations
+    const VectorXd z = meas_package.raw_measurements_;
+    const VectorXd y = z - H_laser_ * x_;
+    const MatrixXd S = H_laser_ * P_ * Ht_laser_ + R_laser_;
+    const MatrixXd K = P_ * Ht_laser_ * S.inverse();
+
+    x_ += K*y;
+    P_ = (I_-K*H_laser_)*P_;
 }
 
 /**

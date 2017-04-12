@@ -93,13 +93,13 @@ private:
     const double std_a_ = 1;
     
     // Process noise standard deviation yaw acceleration in rad/s^2
-    const double std_yawdd_ = 0.3;
+    const double std_yawdd_ = 0.7;
     
     // Laser measurement noise standard deviation position1 in m
-    const double std_laspx_ = 0.15;
+    const double std_laspx_ = 0.1;
     
     // Laser measurement noise standard deviation position2 in m
-    const double std_laspy_ = 0.15;
+    const double std_laspy_ = 0.1;
     
     // Radar measurement noise standard deviation radius in m
     const double std_radr_ = 0.3;
@@ -125,6 +125,14 @@ private:
     double NIS_laser_;
     
     long previous_timestamp_ = 0;
+    
+    // laser
+    const Eigen::MatrixXd I_ = Eigen::MatrixXd::Identity(5, 5);
+
+    // measurement matrix
+    Eigen::MatrixXd H_laser_ = Eigen::MatrixXd(2, 5), Ht_laser_;
+    
+    Eigen::MatrixXd R_laser_ = Eigen::MatrixXd(2, 2);
 };
 
 #endif /* UKF_H */
