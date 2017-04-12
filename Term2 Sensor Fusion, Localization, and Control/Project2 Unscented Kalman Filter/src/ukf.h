@@ -55,7 +55,7 @@ private:
     MatrixXd RadarTc(const VectorXd &x, const MatrixXd &Xsig_pred, const VectorXd &z_pred, const MatrixXd &Zsig);
 
     // initially set to false, set to true in first call of ProcessMeasurement
-    bool is_initialized_ = false;
+    bool is_initialized_ = false, is_phi_initialized_ = false;
     
     // state vector: [pos1 pos2 vel_abs yaw_angle yaw_rate] in SI units and rad
     VectorXd x_ = VectorXd::Zero(5);
@@ -69,7 +69,7 @@ private:
     // State dimension & Augmented state dimension
     const int n_x_ = 5, n_aug_ = 7;
 
-    MatrixXd radar_R_ = MatrixXd::Zero(3,3);
+    MatrixXd R_radar_ = MatrixXd::Zero(3,3);
 
     // Weights of sigma points
     VectorXd weights_ = VectorXd::Zero(2*n_aug_+1);
