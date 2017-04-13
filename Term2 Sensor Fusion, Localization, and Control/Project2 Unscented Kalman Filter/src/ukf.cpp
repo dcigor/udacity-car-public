@@ -1,17 +1,18 @@
 #include "ukf.h"
 #include "tools.h"
+#include <cmath>
 
 namespace {
     double clip_angle(double d) {
-        while (d> M_PI) d-=2*M_PI;
-        while (d<-M_PI) d+=2*M_PI;
+        d = fmod(d, 2*M_PI);
+        if (d> M_PI) d-=2*M_PI;
+        if (d<-M_PI) d+=2*M_PI;
         return d;
     }
 
     VectorXd clip_angle(const VectorXd &x, const size_t index) {
-        //return x;
         VectorXd d = x;
-        d(index) = clip_angle(d(index));
+        d(index)   = clip_angle(d(index));
         return d;
     }
 }
@@ -60,9 +61,14 @@ void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
     }
 
     // for small time increments: skip prediction step
-    const double dt = (meas_package.timestamp_ - previous_timestamp_) / 1000000.0;
+    double dt = (meas_package.timestamp_ - previous_timestamp_) / 1000000.0;
     if (dt > 0.001) {
-        Prediction(dt);
+        if (Prediction(dt)) {
+            init(meas_package);
+            is_initialized_ = false;
+            return;
+        }
+
         is_predicted_       = true;
         previous_timestamp_ = meas_package.timestamp_;
     }   else if (!is_predicted_) {
@@ -80,8 +86,10 @@ void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
 
 void UKF::init(const MeasurementPackage &meas_package) {
     is_initialized_     = true;
+    is_predicted_       = false;
     previous_timestamp_ = meas_package.timestamp_;
     x_                  = MakeX(meas_package);
+    P_                  = MatrixXd::Identity(5, 5);
 }
 
 VectorXd UKF::MakeX(const MeasurementPackage &meas_package) const {
@@ -105,10 +113,16 @@ VectorXd UKF::MakeX(const MeasurementPackage &meas_package) const {
  * @param {double} dt the change in time (in seconds) between the last
  * measurement and this one.
  */
-void UKF::Prediction(const double dt) {
+int UKF::Prediction(const double dt) {
     Xsig_pred_ = PredictSigmaPoints(dt);
-    x_         = clip_angle(WeightedMean(Xsig_pred_), 3);
-    P_         = PredictP(x_, Xsig_pred_);
+    if (!Xsig_pred_.cols()) {
+        // restart due to instability: use more frequent measurements to avoid restarts
+        return -1;
+    }
+
+    x_ = clip_angle(WeightedMean(Xsig_pred_), 3);
+    P_ = PredictP(x_, Xsig_pred_);
+    return 0;
 }
 
 /**
@@ -159,7 +173,11 @@ MatrixXd UKF::AugmentedSigmaPoints() {
     P_aug(n_x_+1, n_x_+1) = std_yawdd_*std_yawdd_;
 
     //create square root matrix
-    const MatrixXd A = P_aug.llt().matrixL();
+    const auto llt = P_aug.llt();
+    if (llt.info() == Eigen::NumericalIssue) {
+        return MatrixXd();
+    }
+    const MatrixXd A = llt.matrixL();
 
     //create augmented sigma points
     const double k    = sqrt(lambda_aug_+n_aug_);
@@ -176,6 +194,9 @@ MatrixXd UKF::AugmentedSigmaPoints() {
 // one column - one point.
 MatrixXd UKF::PredictSigmaPoints(const double dt) {
     const MatrixXd Xsig_aug = AugmentedSigmaPoints();
+    if (!Xsig_aug.cols()) {
+        return Xsig_aug;
+    }
 
     //create matrix with predicted sigma points as columns
     MatrixXd Xsig_pred = MatrixXd::Zero(n_x_, 2*n_aug_+1);
