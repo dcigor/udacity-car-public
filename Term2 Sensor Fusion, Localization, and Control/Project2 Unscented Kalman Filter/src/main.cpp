@@ -130,7 +130,7 @@ int main(int argc, char* argv[]) {
   }
 
   // Create a UKF instance
-  UKF ukf;
+  UKF ukf(true, true);
 
   // used to compute the RMSE later
   vector<VectorXd> estimations;

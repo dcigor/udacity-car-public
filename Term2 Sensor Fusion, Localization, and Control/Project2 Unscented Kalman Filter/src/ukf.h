@@ -11,7 +11,7 @@ using Eigen::VectorXd;
 
 class UKF {
 public:
-    UKF();
+    UKF(const bool use_laser = true, const bool use_radar=true);
 
     // public accessors to the members
     const VectorXd &x() const {return x_;}
@@ -57,7 +57,8 @@ private:
 
     // initially set to false, set to true in first call of ProcessMeasurement
     bool is_initialized_ = false, is_predicted_ = false;
-    
+    const bool use_laser_, use_radar_;
+
     // state vector: [pos1 pos2 vel_abs yaw_angle yaw_rate] in SI units and rad
     VectorXd x_ = VectorXd::Zero(5);
     

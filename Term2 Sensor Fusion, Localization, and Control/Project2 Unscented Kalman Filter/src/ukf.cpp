@@ -17,7 +17,10 @@ namespace {
 }
 
 // Initializes Unscented Kalman filter
-UKF::UKF() {
+UKF::UKF(const bool use_laser, const bool use_radar)
+:   use_laser_(use_laser)
+,   use_radar_(use_radar)
+{
     //set weights
     weights_[0] = lambda_aug_/(lambda_aug_+n_aug_);
     for (int i=1; i<2*n_aug_+1; ++i) {
@@ -43,6 +46,14 @@ UKF::UKF() {
  * either radar or laser.
  */
 void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
+    const bool isRadar = meas_package.sensor_type_ == MeasurementPackage::RADAR;
+    if (isRadar && !use_radar_) {
+        return;
+    }
+    if (!isRadar && !use_laser_) {
+        return;
+    }
+
     if (!is_initialized_) {
         init(meas_package);
         return;
@@ -60,7 +71,7 @@ void UKF::ProcessMeasurement(const MeasurementPackage &meas_package) {
         return;
     }
 
-    if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+    if (isRadar) {
         UpdateRadar(meas_package);
     }   else {
         UpdateLidar(meas_package);
