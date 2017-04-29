@@ -18,25 +18,31 @@ struct Particle {
 	double y;
 	double theta;
 	double weight;
-    
-    LandmarkObs transform(const LandmarkObs obs) const;
 };
 
+
+
 class ParticleFilter {
+	
 	// Number of particles to draw
-	const int num_particles;
-
+	int num_particles; 
+	
+	
+	
 	// Flag, if filter is initialized
-	bool is_initialized = false;
-
+	bool is_initialized;
+	
+	// Vector of weights of all particles
+	std::vector<double> weights;
+	
 public:
-
+	
 	// Set of current particles
 	std::vector<Particle> particles;
 
 	// Constructor
 	// @param M Number of particles
-	ParticleFilter() : num_particles(100) {}
+	ParticleFilter() : num_particles(0), is_initialized(false) {}
 
 	// Destructor
 	~ParticleFilter() {}
@@ -50,7 +56,7 @@ public:
 	 * @param std[] Array of dimension 3 [standard deviation of x [m], standard deviation of y [m]
 	 *   standard deviation of yaw [rad]]
 	 */
-	void init(double x, double y, double theta, const double std[]);
+	void init(double x, double y, double theta, double std[]);
 
 	/**
 	 * prediction Predicts the state for the next time step
@@ -61,8 +67,16 @@ public:
 	 * @param velocity Velocity of car from t to t+1 [m/s]
 	 * @param yaw_rate Yaw rate of car from t to t+1 [rad/s]
 	 */
-	void prediction(double delta_t, const double std_pos[], double velocity, double yaw_rate);
-
+	void prediction(double delta_t, double std_pos[], double velocity, double yaw_rate);
+	
+	/**
+	 * dataAssociation Finds which observations correspond to which landmarks (likely by using
+	 *   a nearest-neighbors data association).
+	 * @param predicted Vector of predicted landmark observations
+	 * @param observations Vector of landmark observations
+	 */
+	void dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations);
+	
 	/**
 	 * updateWeights Updates the weights for each particle based on the likelihood of the 
 	 *   observed measurements. 
@@ -93,13 +107,6 @@ public:
 	const bool initialized() const {
 		return is_initialized;
 	}
-
-    template <typename P1, typename P2>
-    static double weight(const P1 &p1, const P2 &p2, const double sigma_x, const double sigma_y) {
-        return weight(p1.x, p1.y, p2.x, p2.y, sigma_x, sigma_y);
-    }
-
-    static double weight(double x1, double y1, double x2, double y2, double sigma_x, double sigma_y);
 };
 
 

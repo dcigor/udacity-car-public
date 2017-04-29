@@ -100,8 +100,8 @@ inline bool read_map_data(std::string filename, Map& map) {
 
 		// Set values
 		single_landmark_temp.id_i = id_i;
-		single_landmark_temp.x    = landmark_x_f;
-		single_landmark_temp.y    = landmark_y_f;
+		single_landmark_temp.x_f  = landmark_x_f;
+		single_landmark_temp.y_f  = landmark_y_f;
 
 		// Add to landmark list of map:
 		map.landmark_list.push_back(single_landmark_temp);
