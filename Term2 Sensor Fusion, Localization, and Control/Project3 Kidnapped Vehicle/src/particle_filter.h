@@ -19,7 +19,7 @@ struct Particle {
 	double theta;
 	double weight;
     
-    LandmarkObs transform(const LandmarkObs obs);
+    LandmarkObs transform(const LandmarkObs obs) const;
 };
 
 class ParticleFilter {
@@ -28,9 +28,7 @@ class ParticleFilter {
 
 	// Flag, if filter is initialized
 	bool is_initialized = false;
-	
-	// Vector of weights of all particles
-	std::vector<double> weights;
+
 public:
 
 	// Set of current particles
@@ -38,7 +36,7 @@ public:
 
 	// Constructor
 	// @param M Number of particles
-	ParticleFilter() : num_particles(0) {}
+	ParticleFilter() : num_particles(100) {}
 
 	// Destructor
 	~ParticleFilter() {}
@@ -52,7 +50,7 @@ public:
 	 * @param std[] Array of dimension 3 [standard deviation of x [m], standard deviation of y [m]
 	 *   standard deviation of yaw [rad]]
 	 */
-	void init(double x, double y, double theta, double std[]);
+	void init(double x, double y, double theta, const double std[]);
 
 	/**
 	 * prediction Predicts the state for the next time step
@@ -63,16 +61,8 @@ public:
 	 * @param velocity Velocity of car from t to t+1 [m/s]
 	 * @param yaw_rate Yaw rate of car from t to t+1 [rad/s]
 	 */
-	void prediction(double delta_t, double std_pos[], double velocity, double yaw_rate);
-	
-	/**
-	 * dataAssociation Finds which observations correspond to which landmarks (likely by using
-	 *   a nearest-neighbors data association).
-	 * @param predicted Vector of predicted landmark observations
-	 * @param observations Vector of landmark observations
-	 */
-	void dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations);
-	
+	void prediction(double delta_t, const double std_pos[], double velocity, double yaw_rate);
+
 	/**
 	 * updateWeights Updates the weights for each particle based on the likelihood of the 
 	 *   observed measurements. 
@@ -105,11 +95,11 @@ public:
 	}
 
     template <typename P1, typename P2>
-    static double weight(const P1 &p1, const P2 &p2, const double sigma_x, const double sigma_y, const double sigma_z) {
-        return weight(p1.x, p1.y, p2.x, p2.y, sigma_x, sigma_y, sigma_z);
+    static double weight(const P1 &p1, const P2 &p2, const double sigma_x, const double sigma_y) {
+        return weight(p1.x, p1.y, p2.x, p2.y, sigma_x, sigma_y);
     }
 
-    static double weight(double x1, double y1, double x2, double y2, double sigma_x, double sigma_y, double sigma_z);
+    static double weight(double x1, double y1, double x2, double y2, double sigma_x, double sigma_y);
 };
 
 
