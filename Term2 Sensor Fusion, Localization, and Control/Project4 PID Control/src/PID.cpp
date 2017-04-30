@@ -33,7 +33,8 @@ void PID::UpdateError(const double cte) {
 
     prev_cte_ = cte;
 
-    learn_coefficient(cte, Kp);
+    // this allow to learn the best value of any of the coefficients Kp, Kd or Ki
+    //learn_coefficient(cte, Kp);
 }
 
 double PID::TotalError() {
@@ -45,7 +46,7 @@ void PID::learn_coefficient(const double cte, double &K) {
     const double steering = TotalError();
     const double ds       = 2*(prev_steering_-steering);
     prev_steering_        = steering;
-    error_               += cte*cte + /*steering*steering + */ds*ds;
+    error_               += cte*cte + /*steering*steering + */ds*ds; // choose what needs to be minimized
 
     const double now = time(NULL);
     if (!start_time_) {
@@ -54,15 +55,9 @@ void PID::learn_coefficient(const double cte, double &K) {
     }
     
     const double diff = now-start_time_;
-    if (diff < 70) { // collect error for 4 laps
+    if (diff < 70*4) { // collect error for 4 laps
         return;
     }
-
-    // just monitoring: no learning
-    std::cout << "Error: " << error_ << endl;
-    start_time_ = 0;
-    error_ = 0;
-    return;
 
     // enough time (four laps) passed: update the coefficient
     history_.clear();
@@ -70,7 +65,7 @@ void PID::learn_coefficient(const double cte, double &K) {
     if (!is_error_set_) {
         is_error_set_ = true;
         rate_         = K/20;
-        std::cout << "Initial error:" << error_ << " K: " << K << " Will try: " << K+rate_ << std::endl;
+        std::cout << "Initial error: " << error_ << " K: " << K << " Will try: " << K+rate_ << std::endl;
         best_error_   = error_;
         error_        = 0;
         start_time_   = now;
@@ -80,20 +75,20 @@ void PID::learn_coefficient(const double cte, double &K) {
     
     if (is_up_) {
         if (error_ < best_error_) {
-            std::cout << "New best error1:" << error_ << " K: " << K << " rate: " << rate_ << std::endl;
+            std::cout << "New best error1: " << error_ << " K: " << K << " rate: " << rate_ << std::endl;
             best_error_ = error_;
             error_      = 0;
             start_time_ = now;
-            rate_      *= 0.8;//1.1;
+            rate_      *= 0.8;
             K          += rate_;
             std::cout << " Will try K1: " << K << " rate " << rate_ << std::endl;
             return;
         }
 
-        std::cout << "Error increased2:" << error_ << " K: " << K << " rate: " << rate_ << std::endl;
+        std::cout << "Error increased2: " << error_ << " K: " << K << " rate: " << rate_ << std::endl;
         is_up_      = false;
         K          -= 2*rate_;
-        rate_      *= 1.1;//0.8;
+        rate_      *= 1.1;
         error_      = 0;
         start_time_ = now;
         std::cout << " Will try K2: " << K << " rate " << rate_ << std::endl;
@@ -102,21 +97,20 @@ void PID::learn_coefficient(const double cte, double &K) {
 
     is_up_ = true;
     if (error_ < best_error_) {
-        std::cout << "New best error3:" << error_ << " K: " << K << " rate: " << rate_ << std::endl;
+        std::cout << "New best error3: " << error_ << " K: " << K << " rate: " << rate_ << std::endl;
         best_error_ = error_;
         error_      = 0;
         start_time_ = now;
-        rate_      *= 0.8;//1.1;
+        rate_      *= 0.8;
         K          += rate_;
         std::cout << " Will try K3: " << K << " rate " << rate_ << std::endl;
         return;
     }
-    
-    std::cout << "Error increased4:" << error_ << " K: " << K << " rate: " << rate_ << std::endl;
+
+    std::cout << "Error increased4: " << error_ << " K: " << K << " rate: " << rate_ << std::endl;
     K          += 2*rate_;
-    rate_      *= 1.1;//0.8;
+    rate_      *= 1.1;
     error_      = 0;
     start_time_ = now;
     std::cout << " Will try K4: " << K << " rate " << rate_ << std::endl;
-    return;
 }
