@@ -4,6 +4,18 @@
 #include "PID.h"
 #include <math.h>
 
+//#define USE_LATEST_UWS_VERSION
+
+#ifdef USE_LATEST_UWS_VERSION
+    // for the latest version of UWS
+    #define UWS_PARAMTYPE *
+    #define UWS_MEMBER ->
+#else
+    //for the version 0.13
+    #define UWS_PARAMTYPE
+    #define UWS_MEMBER .
+#endif
+
 // for convenience
 using json = nlohmann::json;
 
@@ -34,9 +46,9 @@ int main()
 
   PID pid;
   // TODO: Initialize the pid variable.
-    pid.Init(0.39, 0.001, 8);
+    pid.Init(0.25, 0.001, 8);
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -66,15 +78,15 @@ int main()
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.45;
+          msgJson["throttle"] = 0.35;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
-          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
-        ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+        ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
       }
     }
   });
@@ -94,12 +106,12 @@ int main()
     }
   });
 
-  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, uWS::HttpRequest req) {
     std::cout << "Connected!!!" << std::endl;
   });
 
-  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code, char *message, size_t length) {
-    ws.close();
+  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, int code, char *message, size_t length) {
+    ws UWS_MEMBER close();
     std::cout << "Disconnected" << std::endl;
   });
 
