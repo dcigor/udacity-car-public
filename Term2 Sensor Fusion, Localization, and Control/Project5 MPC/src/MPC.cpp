@@ -2,6 +2,7 @@
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 #include "Eigen-3.3/Eigen/Core"
+#include "Eigen-3.3/Eigen/Geometry"
 
 using CppAD::AD;
 
@@ -35,6 +36,19 @@ class FG_eval {
     // the Solver function below.
   }
 };
+
+World::World(const double x, const double y, const double yaw) {
+    const auto rot = Eigen::Rotation2Dd(yaw);
+    const auto R   = rot.matrix();
+    const auto Rt  = R.transpose();
+    const Eigen::Vector2d translation(x,y);
+
+    X_.topLeftCorner (2,2) = R;
+    X_.topRightCorner(2,1) = translation;
+
+    X_inv_.topLeftCorner (2,2) = Rt;
+    X_inv_.topRightCorner(2,1) = -Rt*translation;
+}
 
 //
 // MPC class definition implementation.
