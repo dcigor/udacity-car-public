@@ -10,6 +10,8 @@
 #include "MPC.h"
 #include "json.hpp"
 
+#include "../../Project4 PID Control/src/PID.h"
+
 #define USE_LATEST_UWS_VERSION
 
 #ifdef USE_LATEST_UWS_VERSION
@@ -83,8 +85,12 @@ int main() {
 
   // MPC is initialized here!
   MPC mpc;
+    
+    PID pid;
+    // TODO: Initialize the pid variable.
+    pid.Init(0.25, 0.001, 8);
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
+  h.onMessage([&mpc, &pid](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -111,24 +117,30 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+            
+            const World w(px, py, psi);
+            const std::vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
 
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          const vector<double> mpc_x_vals(w.getRow(0, pts_local));
+          const vector<double> mpc_y_vals(w.getRow(1, pts_local));
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
+
+            double cte = mpc_y_vals[1];
+            double throttle_value = 0.4;
+            pid.UpdateError(cte);
+            double steer_value = pid.TotalError();
+            // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
+            // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
+            msgJson["steering_angle"] = steer_value;
+            msgJson["throttle"] = throttle_value;
 
           //Display the waypoints/reference line
           vector<double> next_x_vals;

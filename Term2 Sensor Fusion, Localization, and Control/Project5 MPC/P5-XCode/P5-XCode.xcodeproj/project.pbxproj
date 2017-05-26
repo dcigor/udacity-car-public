@@ -18,6 +18,7 @@
 		7840CEC61EB512F500C3C18C /* WebSocket.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 7840CEBB1EB512F500C3C18C /* WebSocket.cpp */; };
 		78896FEC1ED8949000ADAA8B /* MPC.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 78896FEA1ED8949000ADAA8B /* MPC.cpp */; };
 		78896FEE1ED8957800ADAA8B /* libipopt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 78896FED1ED8957800ADAA8B /* libipopt.dylib */; };
+		78896FF21ED8B01000ADAA8B /* PID.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 78896FF01ED8B01000ADAA8B /* PID.cpp */; };
 		78D3C1EE1EB4E58D006369F5 /* libuv.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 78D3C1ED1EB4E58D006369F5 /* libuv.dylib */; };
 		78D3C1F11EB4E607006369F5 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 78D3C1F01EB4E607006369F5 /* libz.tbd */; };
 		78D3C1F71EB4E65B006369F5 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 78D3C1F41EB4E65B006369F5 /* main.cpp */; };
@@ -64,6 +65,8 @@
 		78896FEA1ED8949000ADAA8B /* MPC.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = MPC.cpp; sourceTree = "<group>"; };
 		78896FEB1ED8949000ADAA8B /* MPC.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MPC.h; sourceTree = "<group>"; };
 		78896FED1ED8957800ADAA8B /* libipopt.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libipopt.dylib; path = ../../../../../../../usr/local/lib/libipopt.dylib; sourceTree = "<group>"; };
+		78896FF01ED8B01000ADAA8B /* PID.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = PID.cpp; path = "../Project4 PID Control/src/PID.cpp"; sourceTree = "<group>"; };
+		78896FF11ED8B01000ADAA8B /* PID.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = PID.h; path = "../Project4 PID Control/src/PID.h"; sourceTree = "<group>"; };
 		78A5B3461EB4DCFC008E5DB0 /* P5-XCode */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "P5-XCode"; sourceTree = BUILT_PRODUCTS_DIR; };
 		78D3C1E91EB4E401006369F5 /* libuWS.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libuWS.dylib; path = /usr/local/lib/libuWS.dylib; sourceTree = "<absolute>"; };
 		78D3C1ED1EB4E58D006369F5 /* libuv.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libuv.dylib; path = /usr/local/lib/libuv.dylib; sourceTree = "<absolute>"; };
@@ -121,6 +124,15 @@
 			path = ../../../../../dev/3rd/uWebSockets/src;
 			sourceTree = "<group>";
 		};
+		78896FEF1ED8AFF300ADAA8B /* PID */ = {
+			isa = PBXGroup;
+			children = (
+				78896FF01ED8B01000ADAA8B /* PID.cpp */,
+				78896FF11ED8B01000ADAA8B /* PID.h */,
+			);
+			name = PID;
+			sourceTree = "<group>";
+		};
 		78A5B33D1EB4DCFC008E5DB0 = {
 			isa = PBXGroup;
 			children = (
@@ -142,6 +154,7 @@
 		78A5B3481EB4DCFC008E5DB0 /* P5-XCode */ = {
 			isa = PBXGroup;
 			children = (
+				78896FEF1ED8AFF300ADAA8B /* PID */,
 				78D3C1F21EB4E65B006369F5 /* src */,
 			);
 			name = "P5-XCode";
@@ -239,6 +252,7 @@
 				7840CEC11EB512F500C3C18C /* HTTPSocket.cpp in Sources */,
 				7840CEC01EB512F500C3C18C /* Group.cpp in Sources */,
 				7840CEC61EB512F500C3C18C /* WebSocket.cpp in Sources */,
+				78896FF21ED8B01000ADAA8B /* PID.cpp in Sources */,
 				7840CEBF1EB512F500C3C18C /* Extensions.cpp in Sources */,
 				7840CEC31EB512F500C3C18C /* Networking.cpp in Sources */,
 			);
