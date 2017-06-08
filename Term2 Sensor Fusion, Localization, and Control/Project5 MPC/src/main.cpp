@@ -59,8 +59,7 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals, const Eigen::VectorXd &yvals, const int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -79,16 +78,53 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   auto result = Q.solve(yvals);
   return result;
 }
+Eigen::VectorXd polyfit(const vector<double> &xvals, const vector<double> &yvals, const int order) {
+    Eigen::VectorXd x(xvals.size());
+    Eigen::VectorXd y(yvals.size());
+    for (size_t i=0; i<xvals.size(); ++i) {
+        x(i) = xvals[i];
+        y(i) = yvals[i];
+    }
+    return polyfit(x, y, order);
+}
+
+const double Lf = 2.7;
+
+Eigen::VectorXd globalKinematic(const double x, const double y, const double psi, const double v,
+                                const double delta, const double a, const double dt) {
+    Eigen::VectorXd next_state(4);
+    
+    // Recall the equations for the model:
+    // x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+    // y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+    // psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
+    // v_[t+1] = v[t] + a[t] * dt
+    next_state(0) = x   + v * cos(psi) * dt;
+    next_state(1) = y   + v * sin(psi) * dt;
+    next_state(2) = psi + v / Lf * delta * dt;
+    next_state(3) = v   + a * dt;
+    return next_state;
+}
+
+// TODO: Implement the global kinematic model.
+// Return the next state.
+//
+// NOTE: state is [x, y, psi, v]
+// NOTE: actuators is [delta, a]
+Eigen::VectorXd globalKinematic(const Eigen::VectorXd &state,
+                                const Eigen::VectorXd &actuators, const double dt) {
+    return globalKinematic(state(0), state(1), state(2), state(3), actuators(0), actuators(1), dt);
+}
 
 int main() {
   uWS::Hub h;
 
   // MPC is initialized here!
   MPC mpc;
-    
+
     PID pid;
-    // TODO: Initialize the pid variable.
-    pid.Init(0.25, 0.001, 8);
+    pid.Init(0.25, 0, 8);
+    pid.Init(0.1, 0, 2);
 
   h.onMessage([&mpc, &pid](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -104,12 +140,12 @@ int main() {
         string event = j[0].get<string>();
         if (event == "telemetry") {
           // j[1] is the data JSON object
-          vector<double> ptsx = j[1]["ptsx"];
-          vector<double> ptsy = j[1]["ptsy"];
-          double px = j[1]["x"];
-          double py = j[1]["y"];
-          double psi = j[1]["psi"];
-          double v = j[1]["speed"];
+          const vector<double> ptsx = j[1]["ptsx"];
+          const vector<double> ptsy = j[1]["ptsy"];
+          const double px  = j[1]["x"];
+          const double py  = j[1]["y"];
+          const double psi = j[1]["psi"];
+          const double v   = j[1]["speed"];
 
           /*
           * TODO: Calculate steeering angle and throttle using MPC.
@@ -117,23 +153,37 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-            
-            const World w(px, py, psi);
-            const std::vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
 
+            //predict where the car is going to be in 100 ms in global coordinates
+            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, 0, 0, 0.1);
+            const double globalPredictedX = globalPredictedPos(0);
+            const double globalPredictedY = globalPredictedPos(1);
+            
+            const World w(globalPredictedX, globalPredictedY, psi);
+            const vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
+            //const Eigen::Vector3d localPredictPos    = w.globalToLocal(globalPredictedPos(0), globalPredictedPos(1));
+            
           json msgJson;
 
-          //Display the MPC predicted trajectory 
-          const vector<double> mpc_x_vals(w.getRow(0, pts_local));
-          const vector<double> mpc_y_vals(w.getRow(1, pts_local));
+            //Display the MPC predicted trajectory
+            //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
+            // the points in the simulator are connected by a Green line
+            const vector<double> mpc_x_vals(w.getRow(0, pts_local));
+            const vector<double> mpc_y_vals(w.getRow(1, pts_local));
+            msgJson["mpc_x"] = mpc_x_vals;
+            msgJson["mpc_y"] = mpc_y_vals;
+            
+            // fit the 3rd degree polynomial, in vehicle coordinate system
+            const Eigen::VectorXd pol = polyfit(mpc_x_vals, mpc_y_vals, 3);
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
-
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
+            // calculate cte as distance from the current vehicle position to the polynomial
+            const double polynomial_y = polyeval(pol, 0);
+            const double e = polynomial_y;
 
             double cte = mpc_y_vals[1];
+            //cout << "POLY " << cte << " " << e << " " << endl;
+            cte = e;
+
             double throttle_value = 0.4;
             pid.UpdateError(cte);
             double steer_value = pid.TotalError();
@@ -143,14 +193,26 @@ int main() {
             msgJson["throttle"] = throttle_value;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+            //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
+            // the points in the simulator are connected by a Yellow line
+            vector<double> next_x_vals;
+            vector<double> next_y_vals;
+            
+            // center of the road at the car position, based on poly
+            /*
+            next_x_vals.push_back(0);
+            next_y_vals.push_back(polynomial_y);
+            next_x_vals.push_back(20);
+            next_y_vals.push_back(polynomial_y);
+            */
+            // take into account the steering
+            const World w2(globalPredictedX, globalPredictedY, psi+steer_value/Lf/2);
+            const vector<Eigen::Vector3d> pts_local2(w2.globalToLocal(ptsx, ptsy));
+            next_x_vals = w2.getRow(0, pts_local2);
+            next_y_vals = w2.getRow(1, pts_local2);
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
-
-          msgJson["next_x"] = next_x_vals;
-          msgJson["next_y"] = next_y_vals;
+            msgJson["next_x"] = next_x_vals;
+            msgJson["next_y"] = next_y_vals;
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
