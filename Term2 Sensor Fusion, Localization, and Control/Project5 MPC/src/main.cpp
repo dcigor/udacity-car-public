@@ -10,8 +10,6 @@
 #include "MPC.h"
 #include "json.hpp"
 
-#include "../../Project4 PID Control/src/PID.h"
-
 #define USE_LATEST_UWS_VERSION
 
 #ifdef USE_LATEST_UWS_VERSION
@@ -122,11 +120,7 @@ int main() {
   // MPC is initialized here!
   MPC mpc;
 
-    PID pid;
-    pid.Init(0.25, 0, 8);
-    pid.Init(0.1, 0, 2);
-
-  h.onMessage([&mpc, &pid](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
+  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -148,14 +142,14 @@ int main() {
           const double v   = j[1]["speed"];
 
           /*
-          * TODO: Calculate steeering angle and throttle using MPC.
+          * TODO: Calculate steering angle and throttle using MPC.
           *
           * Both are in between [-1, 1].
           *
           */
 
             //predict where the car is going to be in 100 ms in global coordinates
-            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, 0, 0, 0.1);
+            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, 0, 0, 0);
             const double globalPredictedX = globalPredictedPos(0);
             const double globalPredictedY = globalPredictedPos(1);
             
@@ -178,19 +172,19 @@ int main() {
 
             // calculate cte as distance from the current vehicle position to the polynomial
             const double polynomial_y = polyeval(pol, 0);
-            const double e = polynomial_y;
 
-            double cte = mpc_y_vals[1];
-            //cout << "POLY " << cte << " " << e << " " << endl;
-            cte = e;
-
-            double throttle_value = 0.4;
-            pid.UpdateError(cte);
-            double steer_value = pid.TotalError();
+            const double cte  = polynomial_y;
+            const double epsi = -atan(pol[1]);
+            cout << "POLY " << epsi << " " << endl;
+            
+            mpc.Solve(0, 0, 0, v, cte, epsi, pol);
+            const double throttle_value = mpc.getAcceleration();
+            const double steer_value    = -mpc.getSteeringDelta();
+            
             // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
             // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
             msgJson["steering_angle"] = steer_value;
-            msgJson["throttle"] = throttle_value;
+            msgJson["throttle"      ] = throttle_value;
 
           //Display the waypoints/reference line
             //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
@@ -198,22 +192,14 @@ int main() {
             vector<double> next_x_vals;
             vector<double> next_y_vals;
             
-            // center of the road at the car position, based on poly
-            /*
-            next_x_vals.push_back(0);
-            next_y_vals.push_back(polynomial_y);
-            next_x_vals.push_back(20);
-            next_y_vals.push_back(polynomial_y);
-            */
             // take into account the steering
             const World w2(globalPredictedX, globalPredictedY, psi+steer_value/Lf/2);
             const vector<Eigen::Vector3d> pts_local2(w2.globalToLocal(ptsx, ptsy));
             next_x_vals = w2.getRow(0, pts_local2);
             next_y_vals = w2.getRow(1, pts_local2);
 
-            msgJson["next_x"] = next_x_vals;
-            msgJson["next_y"] = next_y_vals;
-
+            msgJson["next_x"] = mpc.getRow(0);
+            msgJson["next_y"] = mpc.getRow(1);
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
@@ -226,7 +212,7 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          //this_thread::sleep_for(chrono::milliseconds(100));
           ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
@@ -240,8 +226,7 @@ int main() {
   // We don't need this since we're not using HTTP but if it's removed the
   // program
   // doesn't compile :-(
-  h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data,
-                     size_t, size_t) {
+  h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data, size_t, size_t) {
     const std::string s = "<h1>Hello world!</h1>";
     if (req.getUrl().valueLength == 1) {
       res->end(s.data(), s.length());
