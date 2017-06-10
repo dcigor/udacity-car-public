@@ -7,7 +7,7 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-const size_t N = 30;
+const size_t N = 25;
 const double dt = 0.05;
 // The reference velocity is set to 40 mph.
 const double ref_v = 40;
@@ -23,6 +23,8 @@ const double ref_v = 40;
 //
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
+
+extern double polyeval(Eigen::VectorXd coeffs, double x);
 
 /// why global?
 namespace {
@@ -46,12 +48,6 @@ class FG_eval {
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
-//  void operator()(ADvector& fg, const ADvector& vars) {
-    // TODO: implement MPC
-    // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
-    // NOTE: You'll probably go back and forth between this function and
-    // the Solver function below.
-//  }
 
     // `fg` is a vector containing the cost and constraints.
     // `vars` is a vector containing the variable values (state & actuators).
@@ -113,14 +109,15 @@ class FG_eval {
             AD<double> v0 = vars[v_start + t - 1];
             AD<double> cte0 = vars[cte_start + t - 1];
             AD<double> epsi0 = vars[epsi_start + t - 1];
-            
+
             // Only consider the actuation at time t.
             AD<double> delta0 = vars[delta_start + t - 1];
             AD<double> a0 = vars[a_start + t - 1];
-            
-            AD<double> f0 = coeffs[0] + coeffs[1] * x0;
+
+            // we approximte using the cubic polyline
+            AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * x0 * x0 + coeffs[3] * x0 * x0 * x0;
             AD<double> psides0 = CppAD::atan(coeffs[1]);
-            
+
             // Here's `x` to get you started.
             // The idea here is to constraint this value to be 0.
             //
@@ -156,9 +153,7 @@ World::World(const double x, const double y, const double yaw) {
     X_inv_.topRightCorner(2,1) = -Rt*translation;
 }
 
-//
 // MPC class definition implementation.
-//
 MPC::MPC() {}
 MPC::~MPC() {}
 

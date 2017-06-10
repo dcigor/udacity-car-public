@@ -174,7 +174,7 @@ int main() {
             const double polynomial_y = polyeval(pol, 0);
 
             const double cte  = polynomial_y;
-            const double epsi = -atan(pol[1]);
+            const double epsi = atan(pol[1]);
             cout << "POLY " << epsi << " " << endl;
             
             mpc.Solve(0, 0, 0, v, cte, epsi, pol);
