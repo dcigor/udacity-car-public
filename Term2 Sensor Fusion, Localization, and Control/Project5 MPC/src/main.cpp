@@ -179,7 +179,7 @@ int main() {
             const double cte  = 0;//-polynomial_y;
             const double epsi = 0;//atan(pol[1]);
             
-            mpc.Solve(0, 0, 0, v, cte, epsi, pol);
+            mpc.Solve(0, 0, 0, globalPredictedPos(3), cte, epsi, pol);
             
             if (counter > 100) {
                 cost   += mpc.getCost();
