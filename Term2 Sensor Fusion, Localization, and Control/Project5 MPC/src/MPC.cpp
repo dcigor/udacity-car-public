@@ -6,11 +6,27 @@
 
 using CppAD::AD;
 
-extern double polyeval(Eigen::VectorXd coeffs, double x);
+// Evaluate a polynomial.
+double polyeval(Eigen::VectorXd coeffs, double x) {
+    double result = 0.0;
+    for (int i = 0; i < coeffs.size(); i++) {
+        result += coeffs[i] * pow(x, i);
+    }
+    return result;
+}
 
 namespace {
-    const size_t N     = 18;   //  number of time steps
+    
+    // number of time steps. for values of 25 and higher the solver cannot keep up.
+    // smaller values do not let the car to see the turns, until its too late.
+    const size_t N = 18;
+
+    // for values 0.07 and higher - the solver cannot keep up. apparently it affects solver's time.
+    // smaller values do not let the car to see the turns.
     const double dt    = 0.05; // time step duration
+    
+    // the highest value allowed by the simulator.
+    // it might be possible to achieve higher speed after testing in updated simulator.
     const double ref_v = 100;  // The reference velocity, in mph.
     
     // This value assumes the model presented in the classroom is used.
@@ -24,7 +40,7 @@ namespace {
     //
     // This is the length from front to CoG that has a similar radius.
     const double Lf = 2.67;
-    
+
     // The solver takes all the state variables and actuator
     // variables in a singular vector. Thus, we should to establish
     // when one variable starts and another ends to make our lifes easier.
@@ -38,7 +54,12 @@ namespace {
     const size_t a_start     = delta_start + N - 1;
 }
 
-World::World(const double x, const double y, const double yaw) {
+// standard rigid body 2d transformation: translation and rotation
+World::World(const Eigen::VectorXd &state) {
+    const double x   = state(0);
+    const double y   = state(1);
+    const double yaw = state(2);
+
     const auto rot = Eigen::Rotation2Dd(yaw);
     const auto R   = rot.matrix();
     const auto Rt  = R.transpose();
@@ -60,11 +81,12 @@ void FG_eval::operator()(ADvector& fg, const ADvector& vars) {
 
     // The part of the cost based on the reference state.
     for (int t = 0; t < N; t++) {
-        fg[0] += 300*CppAD::pow(vars[cte_start  + t], 2);
+        fg[0] += 500*CppAD::pow(vars[cte_start  + t], 2);
         fg[0] += 200*CppAD::pow(vars[epsi_start + t], 2);
         fg[0] +=     CppAD::pow(vars[v_start    + t] - ref_v, 2);
-        
-        // reduce centrifugal force: v*steering
+
+        // reduce centrifugal force: v*steering:
+        // avoid turning at high speeds.
         fg[0] += 30*CppAD::pow(vars[epsi_start+t]*vars[v_start+t], 2);
     }
     
@@ -115,9 +137,9 @@ void FG_eval::operator()(ADvector& fg, const ADvector& vars) {
         AD<double> delta0 = vars[delta_start + t - 1];
         AD<double> a0     = vars[a_start     + t - 1];
         
-        /// we approximate using the cubic polyline. here is the current value
+        /// we approximate using the cubic polyline. here is the current value: y = a*x^3 + b*x^2 + c*x + d
         AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * x0 * x0 + coeffs[3] * x0 * x0 * x0;
-        /// here is the first derivative (tangent)
+        /// here is the first derivative (tangent): y' = 3*a*x^2 + 2*b*x + c
         AD<double> psides0 = CppAD::atan(coeffs[1] + 2*coeffs[2]*x0 + 3*coeffs[3]*x0*x0);
 
         // Here's `x` to get you started.
@@ -141,12 +163,10 @@ void FG_eval::operator()(ADvector& fg, const ADvector& vars) {
 
 // MPC class definition
 void MPC::Solve(const double x, const double y, const double psi, const double v, const double cte, const double epsi, const Eigen::VectorXd coeffs) {
-    // number of independent variables
-    // N timesteps == N - 1 actuations
+    // number of independent variables: N timesteps == N - 1 actuations
     const size_t n_vars = N * 6 + (N - 1) * 2;
-    // Number of constraints
-    const size_t n_constraints = N * 6;
-    
+    const size_t n_constraints = N * 6; // Number of constraints
+
     // Initial value of the independent variables.
     // Should be 0 except for the initial values.
     Dvector vars(n_vars);
@@ -165,33 +185,27 @@ void MPC::Solve(const double x, const double y, const double psi, const double v
     Dvector vars_lowerbound(n_vars);
     Dvector vars_upperbound(n_vars);
     
-    // Set all non-actuators upper and lowerlimits
+    // Set all non-actuators upper and lower limits
     // to the max negative and positive values.
     for (size_t i = 0; i < delta_start; i++) {
         vars_lowerbound[i] = -1.0e19;
         vars_upperbound[i] = 1.0e19;
     }
-    
-    // The upper and lower limits of delta are set to -25 and 25
-    // degrees (values in radians).
-    // NOTE: Feel free to change this to something else.
+
+    // The upper and lower limits of delta
     for (size_t i = delta_start; i < a_start; i++) {
-        //vars_lowerbound[i] = -0.436332;
-        //vars_upperbound[i] = 0.436332;
         vars_lowerbound[i] = -M_PI/10;
         vars_upperbound[i] =  M_PI/10;
     }
     
     // Acceleration/decceleration upper and lower limits.
-    // NOTE: Feel free to change this to something else.
     for (size_t i = a_start; i < n_vars; i++) {
         vars_lowerbound[i] = -1.0;
         vars_upperbound[i] = 1.0;
     }
     
     // Lower and upper limits for constraints
-    // All of these should be 0 except the initial
-    // state indices.
+    // All of these should be 0 except the initial state indices.
     Dvector constraints_lowerbound(n_constraints);
     Dvector constraints_upperbound(n_constraints);
     for (size_t i = 0; i < n_constraints; i++) {
@@ -222,14 +236,11 @@ void MPC::Solve(const double x, const double y, const double psi, const double v
     options += "Sparse  true        reverse\n";
 
     // solve the problem
-    CppAD::ipopt::solve<Dvector, FG_eval>(options, vars, vars_lowerbound, vars_upperbound, constraints_lowerbound,
-                                          constraints_upperbound, fg_eval, solution_);
+    CppAD::ipopt::solve<Dvector, FG_eval>(options, vars, vars_lowerbound, vars_upperbound,
+        constraints_lowerbound, constraints_upperbound, fg_eval, solution_);
 
     // Check some of the solution values
     const bool ok = solution_.status == CppAD::ipopt::solve_result<Dvector>::success;
-    
-    //auto cost = solution_.obj_value;
-    //std::cout << "Cost " << cost << std::endl;
 }
 
 vector<double> MPC::getRow(const size_t row) const {

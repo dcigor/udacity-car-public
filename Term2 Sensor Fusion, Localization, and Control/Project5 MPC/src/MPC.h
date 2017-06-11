@@ -12,7 +12,7 @@ using namespace std;
 // local coordinates: coordinates from iside the car. x - points forward, y - points left to the car
 class World {
 public:
-    World(double x, double y, double yaw);
+    World(const Eigen::VectorXd &state);
     
     // convert global coordinates to local (car) coordinates
     Eigen::Vector3d globalToLocal(const Eigen::Vector3d &v) const {

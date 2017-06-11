@@ -45,15 +45,6 @@ string hasData(string s) {
   return "";
 }
 
-// Evaluate a polynomial.
-double polyeval(Eigen::VectorXd coeffs, double x) {
-  double result = 0.0;
-  for (int i = 0; i < coeffs.size(); i++) {
-    result += coeffs[i] * pow(x, i);
-  }
-  return result;
-}
-
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
@@ -62,19 +53,18 @@ Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals, const Eigen::VectorXd &yva
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
 
-  for (int i = 0; i < xvals.size(); i++) {
+  for (size_t i = 0; i < xvals.size(); i++) {
     A(i, 0) = 1.0;
   }
 
-  for (int j = 0; j < xvals.size(); j++) {
+  for (size_t j = 0; j < xvals.size(); j++) {
     for (int i = 0; i < order; i++) {
       A(j, i + 1) = A(j, i) * xvals(j);
     }
   }
 
   auto Q = A.householderQr();
-  auto result = Q.solve(yvals);
-  return result;
+  return Q.solve(yvals);
 }
 Eigen::VectorXd polyfit(const vector<double> &xvals, const vector<double> &yvals, const int order) {
     Eigen::VectorXd x(xvals.size());
@@ -88,6 +78,8 @@ Eigen::VectorXd polyfit(const vector<double> &xvals, const vector<double> &yvals
 
 const double Lf = 2.7;
 
+// Implements the global kinematic model.
+// Return the next state.
 Eigen::VectorXd globalKinematic(const double x, const double y, const double psi, const double v,
                                 const double delta, const double a, const double dt) {
     Eigen::VectorXd next_state(4);
@@ -102,16 +94,6 @@ Eigen::VectorXd globalKinematic(const double x, const double y, const double psi
     next_state(2) = psi + v / Lf * delta * dt;
     next_state(3) = v   + a              * dt;
     return next_state;
-}
-
-// TODO: Implement the global kinematic model.
-// Return the next state.
-//
-// NOTE: state is [x, y, psi, v]
-// NOTE: actuators is [delta, a]
-Eigen::VectorXd globalKinematic(const Eigen::VectorXd &state,
-                                const Eigen::VectorXd &actuators, const double dt) {
-    return globalKinematic(state(0), state(1), state(2), state(3), actuators(0), actuators(1), dt);
 }
 
 int main() {
@@ -143,43 +125,39 @@ int main() {
           const double psi = j[1]["psi"];
           const double v   = j[1]["speed"];
 
-            //Calculate steering angle and throttle using MPC.
+            // (I) predict where the car is going to be in 100 ms in global coordinates,
+            // given the current state and values of last actuators.
+            // the state is (x,y,psi and v) of the car in global coordinates.
+            // actuators: the steering value, normalized by the length of the car and acceleration.
+            const Eigen::VectorXd predictedState = globalKinematic(px, py, psi, v, -last_delta/Lf, last_a, 0.1);
 
-            //predict where the car is going to be in 100 ms in global coordinates
-            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, -last_delta/Lf, last_a, 0.1);
-            const double globalPredictedX = globalPredictedPos(0);
-            const double globalPredictedY = globalPredictedPos(1);
-            
-            const World w(globalPredictedX, globalPredictedY, globalPredictedPos(2));
+            // create transformation from global coordinates to local car coordinates
+            const World w(predictedState);
+
+            // transform waypoints to the local coordinates
             const vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
-
-            //Display the MPC predicted trajectory
-            //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-            // the points in the simulator are connected by a Green line
-            const vector<double> mpc_x_vals(w.getRow(0, pts_local));
-            const vector<double> mpc_y_vals(w.getRow(1, pts_local));
+            const vector<double> local_x_vals(w.getRow(0, pts_local));
+            const vector<double> local_y_vals(w.getRow(1, pts_local));
+            
+            //Display the waypoints/reference line in green
             json msgJson;
-            msgJson["mpc_x"] = mpc_x_vals;
-            msgJson["mpc_y"] = mpc_y_vals;
-            
+            msgJson["mpc_x"] = local_x_vals;
+            msgJson["mpc_y"] = local_y_vals;
+
             // fit the 3rd degree polynomial, in vehicle coordinate system
-            const Eigen::VectorXd polynomial = polyfit(mpc_x_vals, mpc_y_vals, 3);
+            const Eigen::VectorXd polynomial = polyfit(local_x_vals, local_y_vals, 3);
 
-            // the car is at the center of its local coordinate system, so all values, expect the speed are zeroes
-            mpc.Solve(0, 0, 0, globalPredictedPos(3), 0, 0, polynomial);
+            // Calculate steering angle and throttle using MPC solver.
+            // the car is at the center of its local coordinate system, so all values, except the speed are zeroes
+            mpc.Solve(0, 0, 0, predictedState(3), 0, 0, polynomial);
 
-            const double throttle_value =  mpc.getAcceleration();
-            const double steer_value    = -mpc.getSteeringDelta();
-            
-            msgJson["steering_angle"] = steer_value;    // positive values turns right
-            msgJson["throttle"      ] = throttle_value;
+            last_delta = -mpc.getSteeringDelta();
+            last_a     =  mpc.getAcceleration();
 
-            last_delta = steer_value;
-            last_a     = throttle_value;
+            msgJson["steering_angle"] = last_delta; // positive values turn right
+            msgJson["throttle"      ] = last_a;
 
-          //Display the waypoints/reference line
-            //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-            // the points in the simulator are connected by a Yellow line
+            //Display the MPC predicted trajectory in yellow
             msgJson["next_x"] = mpc.getRow(0);
             msgJson["next_y"] = mpc.getRow(1);
 
@@ -194,6 +172,9 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
+            
+            // we deal with the latency by predicting where the car is going to be in 100 ms,
+            // and solving MPC from the predicted state. see (I) above.
           this_thread::sleep_for(chrono::milliseconds(100));
           ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
