@@ -66,6 +66,7 @@ class MPC {
     vector<double> getRow(size_t row) const;
     double getSteeringDelta() const;
     double getAcceleration () const;
+    double getCost         () const;
 private:
     typedef CPPAD_TESTVECTOR(double) Dvector;
     CppAD::ipopt::solve_result<Dvector> solution_;

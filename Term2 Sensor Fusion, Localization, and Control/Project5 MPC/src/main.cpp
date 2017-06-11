@@ -97,10 +97,10 @@ Eigen::VectorXd globalKinematic(const double x, const double y, const double psi
     // y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
     // psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
     // v_[t+1] = v[t] + a[t] * dt
-    next_state(0) = x   + v * cos(psi) * dt;
-    next_state(1) = y   + v * sin(psi) * dt;
+    next_state(0) = x   + v * cos(psi)   * dt;
+    next_state(1) = y   + v * sin(psi)   * dt;
     next_state(2) = psi + v / Lf * delta * dt;
-    next_state(3) = v   + a * dt;
+    next_state(3) = v   + a              * dt;
     return next_state;
 }
 
@@ -120,13 +120,16 @@ int main() {
   // MPC is initialized here!
   MPC mpc;
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
+    double last_delta = 0, last_a = 0, cost = 0, speeds = 0;
+    int counter = 0;
+    
+  h.onMessage([&mpc, &last_delta, &last_a, &cost, &counter, &speeds](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -149,21 +152,21 @@ int main() {
           */
 
             //predict where the car is going to be in 100 ms in global coordinates
-            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, 0, 0, 0);
+            const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, -last_delta/Lf, last_a, 0.1);
             const double globalPredictedX = globalPredictedPos(0);
             const double globalPredictedY = globalPredictedPos(1);
             
-            const World w(globalPredictedX, globalPredictedY, psi);
+            const World w(globalPredictedX, globalPredictedY, globalPredictedPos(2));
+            //const World w(px, py, psi-last_delta/Lf);
+            //const World w(px, py, psi);
             const vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
-            //const Eigen::Vector3d localPredictPos    = w.globalToLocal(globalPredictedPos(0), globalPredictedPos(1));
-            
-          json msgJson;
 
             //Display the MPC predicted trajectory
             //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
             // the points in the simulator are connected by a Green line
             const vector<double> mpc_x_vals(w.getRow(0, pts_local));
             const vector<double> mpc_y_vals(w.getRow(1, pts_local));
+            json msgJson;
             msgJson["mpc_x"] = mpc_x_vals;
             msgJson["mpc_y"] = mpc_y_vals;
             
@@ -173,36 +176,37 @@ int main() {
             // calculate cte as distance from the current vehicle position to the polynomial
             const double polynomial_y = polyeval(pol, 0);
 
-            const double cte  = polynomial_y;
-            const double epsi = atan(pol[1]);
-            cout << "POLY " << epsi << " " << endl;
+            const double cte  = 0;//-polynomial_y;
+            const double epsi = 0;//atan(pol[1]);
             
             mpc.Solve(0, 0, 0, v, cte, epsi, pol);
-            const double throttle_value = mpc.getAcceleration();
+            
+            if (counter > 100) {
+                cost   += mpc.getCost();
+                speeds += v;
+            }
+            
+            const double throttle_value =  mpc.getAcceleration();
             const double steer_value    = -mpc.getSteeringDelta();
             
             // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
             // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-            msgJson["steering_angle"] = steer_value;
+            msgJson["steering_angle"] = steer_value; // positive turns right
             msgJson["throttle"      ] = throttle_value;
+            
+            cout << cte << "," << epsi << "," << steer_value << "," << cost << "," << speeds << endl;
+
+            last_delta = steer_value;
+            last_a     = throttle_value;
 
           //Display the waypoints/reference line
             //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
             // the points in the simulator are connected by a Yellow line
-            vector<double> next_x_vals;
-            vector<double> next_y_vals;
-            
-            // take into account the steering
-            const World w2(globalPredictedX, globalPredictedY, psi+steer_value/Lf/2);
-            const vector<Eigen::Vector3d> pts_local2(w2.globalToLocal(ptsx, ptsy));
-            next_x_vals = w2.getRow(0, pts_local2);
-            next_y_vals = w2.getRow(1, pts_local2);
-
             msgJson["next_x"] = mpc.getRow(0);
             msgJson["next_y"] = mpc.getRow(1);
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          //std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -212,8 +216,13 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          //this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(100));
           ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+            
+            counter++;
+            if (counter == 3000) {
+                counter = 0;
+            }
         }
       } else {
         // Manual driving
