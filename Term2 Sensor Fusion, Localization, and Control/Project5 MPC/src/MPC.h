@@ -37,7 +37,7 @@ public:
         return localToGlobal(Eigen::Vector3d(x,y,1));
     }
 
-    // utility method that should be moved sowhere else.
+    // utility method
     // get a vector of x-coordinates or y-coordinates from a vector of vectors
     static vector<double> getRow(const size_t row, const vector<Eigen::Vector3d> &v) {
         vector<double> res(v.size());
@@ -52,14 +52,23 @@ private:
     Eigen::Matrix3d X_inv_ = Eigen::Matrix3d::Identity();
 };
 
+class FG_eval {
+public:
+    // Fitted polynomial coefficients
+    FG_eval(const Eigen::VectorXd &coeffs) { this->coeffs = coeffs; }
+
+    typedef CPPAD_TESTVECTOR(CppAD::AD<double>) ADvector;
+
+    // `fg` is a vector containing the cost and constraints.
+    // `vars` is a vector containing the variable values (state & actuators).
+    void operator()(ADvector& fg, const ADvector& vars);
+private:
+    Eigen::VectorXd coeffs;
+};
+
 class MPC {
  public:
-  MPC();
-
-  virtual ~MPC();
-
   // Solve the model given an initial state and polynomial coefficients.
-  // Return the first actuatotions.
     void Solve(double x, double y, double psi, double v, double cte, double epsi, Eigen::VectorXd coeffs);
 
     // accessors

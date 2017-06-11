@@ -120,16 +120,15 @@ int main() {
   // MPC is initialized here!
   MPC mpc;
 
-    double last_delta = 0, last_a = 0, cost = 0, speeds = 0;
-    int counter = 0;
+    // steering and acceleration from the previous iteration
+    double last_delta = 0, last_a = 0;
     
-  h.onMessage([&mpc, &last_delta, &last_a, &cost, &counter, &speeds](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
-                     uWS::OpCode opCode) {
+  h.onMessage([&mpc, &last_delta, &last_a](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    //cout << sdata << endl;
+    cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -144,12 +143,7 @@ int main() {
           const double psi = j[1]["psi"];
           const double v   = j[1]["speed"];
 
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
+            //Calculate steering angle and throttle using MPC.
 
             //predict where the car is going to be in 100 ms in global coordinates
             const Eigen::VectorXd globalPredictedPos = globalKinematic(px, py, psi, v, -last_delta/Lf, last_a, 0.1);
@@ -157,8 +151,6 @@ int main() {
             const double globalPredictedY = globalPredictedPos(1);
             
             const World w(globalPredictedX, globalPredictedY, globalPredictedPos(2));
-            //const World w(px, py, psi-last_delta/Lf);
-            //const World w(px, py, psi);
             const vector<Eigen::Vector3d> pts_local(w.globalToLocal(ptsx, ptsy));
 
             //Display the MPC predicted trajectory
@@ -171,30 +163,16 @@ int main() {
             msgJson["mpc_y"] = mpc_y_vals;
             
             // fit the 3rd degree polynomial, in vehicle coordinate system
-            const Eigen::VectorXd pol = polyfit(mpc_x_vals, mpc_y_vals, 3);
+            const Eigen::VectorXd polynomial = polyfit(mpc_x_vals, mpc_y_vals, 3);
 
-            // calculate cte as distance from the current vehicle position to the polynomial
-            const double polynomial_y = polyeval(pol, 0);
+            // the car is at the center of its local coordinate system, so all values, expect the speed are zeroes
+            mpc.Solve(0, 0, 0, globalPredictedPos(3), 0, 0, polynomial);
 
-            const double cte  = 0;//-polynomial_y;
-            const double epsi = 0;//atan(pol[1]);
-            
-            mpc.Solve(0, 0, 0, globalPredictedPos(3), cte, epsi, pol);
-            
-            if (counter > 100) {
-                cost   += mpc.getCost();
-                speeds += v;
-            }
-            
             const double throttle_value =  mpc.getAcceleration();
             const double steer_value    = -mpc.getSteeringDelta();
             
-            // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-            // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-            msgJson["steering_angle"] = steer_value; // positive turns right
+            msgJson["steering_angle"] = steer_value;    // positive values turns right
             msgJson["throttle"      ] = throttle_value;
-            
-            cout << cte << "," << epsi << "," << steer_value << "," << cost << "," << speeds << endl;
 
             last_delta = steer_value;
             last_a     = throttle_value;
@@ -205,8 +183,8 @@ int main() {
             msgJson["next_x"] = mpc.getRow(0);
             msgJson["next_y"] = mpc.getRow(1);
 
-          auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          //std::cout << msg << std::endl;
+          const auto msg = "42[\"steer\"," + msgJson.dump() + "]";
+          std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -218,11 +196,6 @@ int main() {
           // SUBMITTING.
           this_thread::sleep_for(chrono::milliseconds(100));
           ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-            
-            counter++;
-            if (counter == 3000) {
-                counter = 0;
-            }
         }
       } else {
         // Manual driving
