@@ -21,7 +21,6 @@
 		7828F1091F37EDDD00C70767 /* libssl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7828F1031F37EDDD00C70767 /* libssl.a */; };
 		7828F10A1F37EDDD00C70767 /* libipopt.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 7828F1041F37EDDD00C70767 /* libipopt.dylib */; };
 		7828F10B1F37EDDD00C70767 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 7828F1051F37EDDD00C70767 /* libz.tbd */; };
-		7828F10C1F37EDDD00C70767 /* libuWS.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 7828F1061F37EDDD00C70767 /* libuWS.dylib */; };
 		7828F10D1F37EDDD00C70767 /* libuv.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 7828F1071F37EDDD00C70767 /* libuv.dylib */; };
 /* End PBXBuildFile section */
 
@@ -68,7 +67,6 @@
 		7828F1031F37EDDD00C70767 /* libssl.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libssl.a; path = ../../../../../../dev/depends/v5/openssl/lib/libssl.a; sourceTree = "<group>"; };
 		7828F1041F37EDDD00C70767 /* libipopt.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libipopt.dylib; path = ../../../../../../../../usr/local/lib/libipopt.dylib; sourceTree = "<group>"; };
 		7828F1051F37EDDD00C70767 /* libz.tbd */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
-		7828F1061F37EDDD00C70767 /* libuWS.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libuWS.dylib; path = ../../../../../../../../usr/local/lib/libuWS.dylib; sourceTree = "<group>"; };
 		7828F1071F37EDDD00C70767 /* libuv.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libuv.dylib; path = ../../../../../../../../usr/local/lib/libuv.dylib; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -82,7 +80,6 @@
 				7828F1091F37EDDD00C70767 /* libssl.a in Frameworks */,
 				7828F10D1F37EDDD00C70767 /* libuv.dylib in Frameworks */,
 				7828F1081F37EDDD00C70767 /* libcrypto.a in Frameworks */,
-				7828F10C1F37EDDD00C70767 /* libuWS.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -114,7 +111,6 @@
 				7828F1031F37EDDD00C70767 /* libssl.a */,
 				7828F1041F37EDDD00C70767 /* libipopt.dylib */,
 				7828F1051F37EDDD00C70767 /* libz.tbd */,
-				7828F1061F37EDDD00C70767 /* libuWS.dylib */,
 				7828F1071F37EDDD00C70767 /* libuv.dylib */,
 			);
 			path = XCode;
@@ -369,6 +365,7 @@
 				7828E6FE1F37AEA500C70767 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

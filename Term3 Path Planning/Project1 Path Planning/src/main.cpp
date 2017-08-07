@@ -22,6 +22,7 @@
 #endif
 
 using namespace std;
+using namespace Eigen;
 
 // for convenience
 using json = nlohmann::json;
@@ -144,12 +145,11 @@ vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x
 }
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
-vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> maps_x, vector<double> maps_y)
+vector<double> getXY(const double s, const double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
 {
 	int prev_wp = -1;
 
-	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
-	{
+    while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) )) {
 		prev_wp++;
 	}
 
@@ -171,45 +171,183 @@ vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> m
 
 }
 
+vector<double> JMT(const vector<double> &start, const vector<double> &end, const double T) {
+    /*
+     Calculate the Jerk Minimizing Trajectory that connects the initial state
+     to the final state in time T.
+     
+     INPUTS
+     
+     start - the vehicles start location given as a length three array
+     corresponding to initial values of [s, s_dot, s_double_dot]
+     
+     end   - the desired end state for vehicle. Like "start" this is a
+     length three array.
+     
+     T     - The duration, in seconds, over which this maneuver should occur.
+     
+     OUTPUT
+     an array of length 6, each value corresponding to a coefficent in the polynomial
+     s(t) = a_0 + a_1 * t + a_2 * t**2 + a_3 * t**3 + a_4 * t**4 + a_5 * t**5
+     
+     EXAMPLE
+     
+     > JMT( [0, 10, 0], [10, 10, 0], 1)
+     [0.0, 10.0, 0.0, 0.0, 0.0, 0.0]
+     */
+    
+    const double si = start[0], si_d = start[1], si_dd = start[2];
+    const double sf = end  [0], sf_d =   end[1], sf_dd =   end[2];
+    Matrix3f A;
+    Vector3f b;
+    A << T*T*T, T*T*T*T, T*T*T*T*T,
+    3*T*T, 4*T*T*T, 5*T*T*T*T,
+    6*T  , 12 *T*T, 20 *T*T*T;
+    b[0] = sf    - (si+si_d*T+0.5*si_dd*T*T);
+    b[1] = sf_d  - (si_d + si_dd*T);
+    b[2] = sf_dd - si_dd;
+
+    const Vector3f x = A.colPivHouseholderQr().solve(b);
+    return {si, si_d, 0.5*si_dd, x[0], x[1], x[2]};
+}
+
+class Driver {
+public:
+    const double TARGET_SPEED_MPH = 20;
+    const double TARGET_SPEED = TARGET_SPEED_MPH * 1609 / 3600;
+    const double TICK = 0.02; // 20 ms between points
+
+    struct Points {
+        vector<double> x;
+        vector<double> y;
+    };
+    
+    struct CarState {
+        double car_x;
+        double car_y;
+        double car_s;
+        double car_d;
+        double car_yaw;
+        double car_speed;
+
+        template<typename J>
+        static CarState initFromJson(const J& j) {
+            CarState carState;
+            carState.car_x     = j[1]["x"];
+            carState.car_y     = j[1]["y"];
+            carState.car_s     = j[1]["s"];
+            carState.car_d     = j[1]["d"];
+            carState.car_yaw   = j[1]["yaw"];
+            carState.car_speed = j[1]["speed"];
+            return carState;
+        }
+    };
+
+    // loads waypoints on start
+    Driver(const string &filename) {
+        // Waypoint map to read from
+        ifstream in_map_(filename.c_str(), ifstream::in);
+
+        string line;
+        while (getline(in_map_, line)) {
+            istringstream iss(line);
+            double x, y;
+            float s, d_x, d_y;
+            iss >> x >> y >> s >> d_x >> d_y;
+            map_waypoints_x .push_back(x);
+            map_waypoints_y .push_back(y);
+            map_waypoints_s .push_back(s);
+            map_waypoints_dx.push_back(d_x);
+            map_waypoints_dy.push_back(d_y);
+        }
+    }
+
+    Points keepLine(const CarState& carState) {
+        return keepLineSimple(carState);
+    
+        // go from the current state to state with the same d, s+10, speed : 10
+        const double T    = 1; // reach the target speed within this time
+        const int count   = 50; // how many points?
+        const double tick = T/count;
+
+        // end state in Frenet
+        const double startS = carState.car_s;
+        const double startS_dot = carState.car_speed;
+        const double startS_dot_dot = 0;
+        const double endS = carState.car_s + TARGET_SPEED * T;
+        const double endS_dot = TARGET_SPEED;
+        const double endS_dot_dot = 0;
+
+        const double startD = carState.car_d;
+        const double endD = carState.car_d;
+        const double endD_dot = 0;
+        const double endD_dot_dot = 0;
+
+        const auto coefs_s = JMT({startS, startS_dot, startS_dot_dot}, {endS, endS_dot, endS_dot_dot}, T);
+        const auto coefs_d = JMT({startD, 0, 0}, {endD, 0, 0}, T);
+    
+        cout << "AA ";
+        Points points;
+        double lastS = startS;
+        for (int i=0; i<count; ++i) {
+            const double s = poly(coefs_s, i*tick);
+            const double d = startD;//poly(coefs_d, T/count*i);
+            if (s<startS || s>endS) {
+                cout << s;
+            }
+            cout << endS-s << ", speed: " << (s-lastS)/tick << endl;
+            lastS = s;
+
+            const auto xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            points.x.push_back(xy[0]);
+            points.y.push_back(xy[1]);
+        }
+        cout << "BB ";
+        return points;
+    }
+    
+    Points keepLineSimple(const CarState& carState) {
+        // go from the current state to state with the same d, s+10, speed : 10
+        const double T      = 1; // reach the target speed within this time
+        const int count     = T/TICK; // how many points?
+        const double startS = carState.car_s;
+        const double startD = carState.car_d;
+
+        Points points;
+        for (int i=0; i<count; ++i) {
+            const double s = startS + TARGET_SPEED*i*TICK;
+            const auto xy  = getXY(s, startD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            points.x.push_back(xy[0]);
+            points.y.push_back(xy[1]);
+        }
+        return points;
+    }
+
+    double poly(const vector<double> &coeffs, const double x) const {
+        double res = 0, arg = 1;
+        for (const double coef : coeffs) {
+            res += coef * arg;
+            arg *= x;
+        }
+        return res;
+    }
+private:
+    vector<double> map_waypoints_x;
+    vector<double> map_waypoints_y;
+    vector<double> map_waypoints_s;
+    vector<double> map_waypoints_dx;
+    vector<double> map_waypoints_dy;
+};
+
+
 int main() {
-  uWS::Hub h;
+    uWS::Hub h;
 
-  // Load up map values for waypoint's x,y,s and d normalized normal vectors
-  vector<double> map_waypoints_x;
-  vector<double> map_waypoints_y;
-  vector<double> map_waypoints_s;
-  vector<double> map_waypoints_dx;
-  vector<double> map_waypoints_dy;
+    // Load up map values for waypoint's x,y,s and d normalized normal vectors
+    Driver driver("../data/highway_map.csv");
+    const double max_s = 6945.554;
 
-  // Waypoint map to read from
-  string map_file_ = "../data/highway_map.csv";
-  // The max s value before wrapping around the track back to 0
-  double max_s = 6945.554;
-
-  ifstream in_map_(map_file_.c_str(), ifstream::in);
-
-  string line;
-  while (getline(in_map_, line)) {
-  	istringstream iss(line);
-  	double x;
-  	double y;
-  	float s;
-  	float d_x;
-  	float d_y;
-  	iss >> x;
-  	iss >> y;
-  	iss >> s;
-  	iss >> d_x;
-  	iss >> d_y;
-  	map_waypoints_x.push_back(x);
-  	map_waypoints_y.push_back(y);
-  	map_waypoints_s.push_back(s);
-  	map_waypoints_dx.push_back(d_x);
-  	map_waypoints_dy.push_back(d_y);
-  }
-
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length,
-                     uWS::OpCode opCode) {
+  h.onMessage([&driver](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -228,12 +366,7 @@ int main() {
           // j[1] is the data JSON object
           
         	// Main car's localization Data
-          	double car_x = j[1]["x"];
-          	double car_y = j[1]["y"];
-          	double car_s = j[1]["s"];
-          	double car_d = j[1]["d"];
-          	double car_yaw = j[1]["yaw"];
-          	double car_speed = j[1]["speed"];
+            const Driver::CarState carState = Driver::CarState::initFromJson(j);
 
           	// Previous path data given to the Planner
           	auto previous_path_x = j[1]["previous_path_x"];
@@ -246,16 +379,13 @@ int main() {
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
           	json msgJson;
+            const Driver::Points points = driver.keepLine(carState);
+          	msgJson["next_x"] = points.x;
+          	msgJson["next_y"] = points.y;
 
-          	vector<double> next_x_vals;
-          	vector<double> next_y_vals;
+          	const auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
-
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-          	msgJson["next_x"] = next_x_vals;
-          	msgJson["next_y"] = next_y_vals;
-
-          	auto msg = "42[\"control\","+ msgJson.dump()+"]";
+            //cout << msg << endl;
 
           	//this_thread::sleep_for(chrono::milliseconds(1000));
           	ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
