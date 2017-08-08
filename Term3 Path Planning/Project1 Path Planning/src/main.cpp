@@ -217,29 +217,88 @@ public:
     const double TARGET_SPEED = TARGET_SPEED_MPH * 1609 / 3600;
     const double TICK = 0.02; // 20 ms between points
 
+    struct Point {
+        double x, y;
+
+        static Point fromArray(const vector<double> &a) {
+            Point p;
+            p.x = a[0];
+            p.y = a[1];
+            return p;
+        }
+        
+        Point operator-(const Point &b) const {
+            return {x-b.x, y-b.y};
+        }
+        
+        Point operator/(const double &b) const {
+            return {x/b, y/b};
+        }
+
+        double abs() const {
+            return sqrt(x*x+y*y);
+        }
+    };
+
     struct Points {
         vector<double> x;
         vector<double> y;
+
+        void push(const Point &point) {
+            x.push_back(point.x);
+            y.push_back(point.y);
+        }
+        
+        size_t size() const {
+            return x.size();
+        }
+
+        Point operator[](const size_t i) const {
+            return {x[i], y[i]};
+        }
     };
-    
+
     struct CarState {
-        double car_x;
-        double car_y;
+        Point  carXY;
         double car_s;
         double car_d;
         double car_yaw;
         double car_speed;
 
+        // Previous path data given to the Planner
+        Points previous_pathXY;
+        // Previous path's end s and d values
+        double end_path_s;
+        double end_path_d;
+        
+        // Sensor Fusion Data, a list of all other cars on the same side of the road.
+        vector<vector<double>> sensor_fusion;
+
         template<typename J>
         static CarState initFromJson(const J& j) {
             CarState carState;
-            carState.car_x     = j[1]["x"];
-            carState.car_y     = j[1]["y"];
+            carState.carXY.x   = j[1]["x"];
+            carState.carXY.y   = j[1]["y"];
             carState.car_s     = j[1]["s"];
             carState.car_d     = j[1]["d"];
-            carState.car_yaw   = j[1]["yaw"];
+            carState.car_yaw   = double(j[1]["yaw"])/360*2*M_PI;
             carState.car_speed = j[1]["speed"];
+
+            const vector<double> previous_path_x = j[1]["previous_path_x"];
+            const vector<double> previous_path_y = j[1]["previous_path_y"];
+            carState.previous_pathXY.x = previous_path_x;
+            carState.previous_pathXY.y = previous_path_y;
+            carState.end_path_s        = j[1]["end_path_s"];
+            carState.end_path_d        = j[1]["end_path_d"];
+
+            const vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
+            carState.sensor_fusion = sensor_fusion;
             return carState;
+        }
+
+        friend ostream& operator<<(ostream& os, const CarState& s) {
+            os << "x: " << s.carXY.x << ", y: " << s.carXY.y << ", s: " << s.car_s << ", d: " << s.car_d << ", ya: " << s.car_yaw << ", sp: " << s.car_speed;
+            return os;
         }
     };
 
@@ -262,8 +321,12 @@ public:
         }
     }
 
-    Points keepLine(const CarState& carState) {
-        return keepLineSimple(carState);
+    Points drive(const CarState& carState) {
+        return driveCircle(carState);
+    }
+
+    Points keepLine(const CarState& carState, const int line=2) {
+        return keepLineXY(carState);
     
         // go from the current state to state with the same d, s+10, speed : 10
         const double T    = 1; // reach the target speed within this time
@@ -298,29 +361,115 @@ public:
             cout << endS-s << ", speed: " << (s-lastS)/tick << endl;
             lastS = s;
 
-            const auto xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            points.x.push_back(xy[0]);
-            points.y.push_back(xy[1]);
+            const Point xy = getXY(s, d);
+            points.x.push_back(xy.x);
+            points.y.push_back(xy.y);
         }
         cout << "BB ";
         return points;
     }
+
+    Points keepLineXY(const CarState& carState, const int lane=2) {
+        // go from the current state to state with the same d, s+10, speed : 10
+        const double T    = 2;      // reach the target speed within this time
+        const int count   = T/TICK; // how many points?
+
+        Point startXY     = getXY(carState.car_s, carState.car_d);
+        Point startXY_dot = {carState.car_speed * cos(carState.car_yaw),
+                             carState.car_speed * sin(carState.car_yaw)};
+        Point startXY_dot_dot = {0, 0};
+
+        // use previously generated points, when present
+        Points points;
+        for (size_t i=0; i<carState.previous_pathXY.x.size(); ++i) {
+            const Point currXY = {carState.previous_pathXY.x[i], carState.previous_pathXY.y[i]};
+            points.push(currXY);
+
+            if (i>0) {
+                const Point currXY_dot = (currXY-startXY)/TICK;
+                startXY_dot_dot        = (currXY_dot-startXY_dot)/TICK;
+                startXY_dot            = currXY_dot;
+            }
+
+            startXY = currXY;
+        }
+
+        const double endS      = carState.car_s+TARGET_SPEED * T, endD = lane * 4 - 2;
+        const double endS_prev = carState.car_s+TARGET_SPEED * (T-TICK); // the point before the last point in the future
+        
+        const auto endXY       = getXY(endS     ,      endD);
+        const auto endXY_prev  = getXY(endS_prev,      endD);
+        
+        const double endYaw = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
+        
+        const double endX_dot = TARGET_SPEED * cos(endYaw);
+        const double endY_dot = TARGET_SPEED * sin(endYaw);
+        
+        const double endX_dot_dot = 0;
+        const double endY_dot_dot = 0;
+        
+        const auto coefs_x = JMT({startXY.x, startXY_dot.x, startXY_dot_dot.x}, {endXY.x, endX_dot, endX_dot_dot}, T);
+        const auto coefs_y = JMT({startXY.y, startXY_dot.y, startXY_dot_dot.y}, {endXY.y, endY_dot, endY_dot_dot}, T);
+
+        cout << carState << endl;
+
+//        double lastS = startS;
+        Point last = startXY;
+        for (size_t i=0; points.x.size()<count/2; ++i) {
+            const Point curr = {poly(coefs_x, i*TICK), poly(coefs_y, i*TICK) };
+            points.push(curr);
+
+            const double speed = (curr-last).abs() / TICK;
+
+            cout << curr.x << ", " << curr.y << ", Speed: " << speed << endl;
+            last = curr;
+        }
+        return points;
+    }
     
-    Points keepLineSimple(const CarState& carState) {
+    Points keepLineSimple(const CarState& carState, const int lane=2) { // 1: left lane; 2: middle lane; 3: right lane
         // go from the current state to state with the same d, s+10, speed : 10
         const double T      = 1; // reach the target speed within this time
         const int count     = T/TICK; // how many points?
         const double startS = carState.car_s;
-        const double startD = carState.car_d;
+        const double startD = lane * 4 - 2;
 
         Points points;
         for (int i=0; i<count; ++i) {
             const double s = startS + TARGET_SPEED*i*TICK;
-            const auto xy  = getXY(s, startD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            points.x.push_back(xy[0]);
-            points.y.push_back(xy[1]);
+            points.push(getXY(s, startD));
         }
         return points;
+    }
+
+    Points driveCircle(const CarState& carState) {
+        Points points;
+        
+        Point pos    = carState.carXY;
+        double angle = carState.car_yaw;
+        const size_t path_size = carState.previous_pathXY.size();
+        for (size_t i=0; i<path_size; i++) {
+            points.push(carState.previous_pathXY[i]);
+        }
+
+        if (path_size) {
+            pos = carState.previous_pathXY[path_size-1];
+            const Point pos2 = carState.previous_pathXY[path_size-2];
+            angle = atan2(pos.y-pos2.y, pos.x-pos2.x);
+        }
+
+        double dist_inc = 0.5;
+        for (size_t i=0; i < 50-path_size; i++) {
+            pos.x += dist_inc*cos(angle+(i+1)*(pi()/100));
+            pos.y += dist_inc*sin(angle+(i+1)*(pi()/100));
+            points.push(pos);
+        }
+
+        return points;
+    }
+    
+    Point getXY(const double s, const double d) const {
+        return Point::fromArray(::getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y));
     }
 
     double poly(const vector<double> &coeffs, const double x) const {
@@ -347,7 +496,7 @@ int main() {
     Driver driver("../data/highway_map.csv");
     const double max_s = 6945.554;
 
-  h.onMessage([&driver](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
+    h.onMessage([&driver](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -363,28 +512,14 @@ int main() {
         string event = j[0].get<string>();
         
         if (event == "telemetry") {
-          // j[1] is the data JSON object
-          
-        	// Main car's localization Data
             const Driver::CarState carState = Driver::CarState::initFromJson(j);
+            const Driver::Points points     = driver.drive(carState);
 
-          	// Previous path data given to the Planner
-          	auto previous_path_x = j[1]["previous_path_x"];
-          	auto previous_path_y = j[1]["previous_path_y"];
-          	// Previous path's end s and d values 
-          	double end_path_s = j[1]["end_path_s"];
-          	double end_path_d = j[1]["end_path_d"];
-
-          	// Sensor Fusion Data, a list of all other cars on the same side of the road.
-          	auto sensor_fusion = j[1]["sensor_fusion"];
-
-          	json msgJson;
-            const Driver::Points points = driver.keepLine(carState);
+            json msgJson;
           	msgJson["next_x"] = points.x;
           	msgJson["next_y"] = points.y;
 
           	const auto msg = "42[\"control\","+ msgJson.dump()+"]";
-
             //cout << msg << endl;
 
           	//this_thread::sleep_for(chrono::milliseconds(1000));
