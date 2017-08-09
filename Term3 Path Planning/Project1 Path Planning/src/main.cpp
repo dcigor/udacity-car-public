@@ -219,7 +219,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 30;
+    const double TARGET_SPEED_MPH = 45;
     const double TARGET_SPEED = mph2mps(TARGET_SPEED_MPH);
     const double TICK = 0.02; // 20 ms between points
 
@@ -246,7 +246,7 @@ public:
         }
         
         friend ostream& operator<<(ostream& os, const Point& p) {
-            os << " {x: " << p.x << ", y: " << p.y << ", |" << p.abs() <<"|} ";
+            os << "{" << p.x << ", " << p.y << ", |" << p.abs() <<"|}";
             return os;
         }
     };
@@ -266,6 +266,12 @@ public:
 
         Point operator[](const size_t i) const {
             return {x[i], y[i]};
+        }
+        
+        Points& operator+=(const Points& b) {
+            x.insert(x.end(), b.x.begin(), b.x.end());
+            y.insert(y.end(), b.y.begin(), b.y.end());
+            return *this;
         }
     };
 
@@ -333,7 +339,7 @@ public:
     }
 
     Points drive(const CarState& carState) {
-        return keepLineXY(carState);//driveCircle(carState);
+        return keepLineXY(carState);
     }
 
     Points keepLine(const CarState& carState, const int line=2) {
@@ -382,8 +388,9 @@ public:
 
     Points keepLineXY(const CarState& carState, const int lane=2) {
         // go from the current state to state with the same d, s+10, speed : 10
-        const double T    = 3;      // reach the target speed within this time
+        const double T    = 2;      // reach the target speed within this time
         const int count   = T/TICK; // how many points?
+        const double MAX_ACC = 5;   // do not exceed this acceleration
 
         Point startXY     = carState.carXY;
         Point startXY_dot = {carState.car_speed * cos(carState.car_yaw),
@@ -391,9 +398,12 @@ public:
         Point startXY_dot_dot = {0, 0};
 
         // use previously generated points, when present
-        const double DURATION  = T;
-        Points points          = carState.previous_pathXY;
-        double endS            = carState.car_s+TARGET_SPEED * DURATION, endD = lane * 4 - 2;
+        Points points = carState.previous_pathXY;
+        if (points.size()>count/2) {
+            return points; // keep following the earlier generated path
+        }
+
+        double startS = carState.car_s;
         if (points.size()) {
             startXY     = points[points.size()-1];
             const Point prev = points[points.size()-2];
@@ -401,36 +411,102 @@ public:
             const Point prev_prev = points[points.size()-3];
             const Point prevSpeed = (prev-prev_prev)/TICK;
             startXY_dot_dot = (startXY_dot-prevSpeed)/TICK;
-            
-            endS = carState.end_path_s+TARGET_SPEED * DURATION, endD = lane * 4 - 2;
+
+            startS = carState.end_path_s;
         }
 
-        const double endS_prev = endS - TARGET_SPEED * TICK; // the point before the last point in the future
+        double desiredEndSpeed = TARGET_SPEED;
+        double endS = startS + TARGET_SPEED * T, endD = lane * 4 - 2;
+
+        // how far we can go with the max acceleration?
+        const double maxS = startS + startXY_dot.abs() * T + 0.5*MAX_ACC * T * T;
+        const bool useConstantAcceleration = endS > maxS;
+        if (useConstantAcceleration) {
+            endS = maxS;
+            desiredEndSpeed = min(TARGET_SPEED, startXY_dot.abs()+MAX_ACC * T);
+        }
+
+        const double endS_prev = endS - desiredEndSpeed * TICK; // the point before the last point in the future
 
         const auto endXY       = getXY(endS     , endD);
         const auto endXY_prev  = getXY(endS_prev, endD);
 
         const double endYaw    = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
 
-        const double endX_dot = TARGET_SPEED * cos(endYaw);
-        const double endY_dot = TARGET_SPEED * sin(endYaw);
+        const Point endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
 
-        const double endX_dot_dot = 0;
-        const double endY_dot_dot = 0;
+        const Point endXY_dot_dot = {0, 0};
         
-        const auto coefs_x = JMT({startXY.x, startXY_dot.x, startXY_dot_dot.x}, {endXY.x, endX_dot, endX_dot_dot}, T);
-        const auto coefs_y = JMT({startXY.y, startXY_dot.y, startXY_dot_dot.y}, {endXY.y, endY_dot, endY_dot_dot}, T);
-
         cout << carState << ", A: " << startXY_dot_dot << ", " << startXY_dot_dot.abs() << ", end: " << endXY << endl;
 
+        //if (useConstantAcceleration) {
+        //    return points += constantAcceleration(startXY, startXY_dot, startXY_dot_dot, endXY, endXY_dot, endXY_dot_dot, T);
+        //}
+
+        const auto coefs_x = JMT({startXY.x, startXY_dot.x, startXY_dot_dot.x}, {endXY.x, endXY_dot.x, endXY_dot_dot.x}, T);
+        const auto coefs_y = JMT({startXY.y, startXY_dot.y, startXY_dot_dot.y}, {endXY.y, endXY_dot.y, endXY_dot_dot.y}, T);
+
+        Point last = startXY;
+        Point lastSpeed = startXY_dot;
+        for (size_t i=1; i<=count; ++i) {
+            const Point curr = {poly(coefs_x, i*TICK), poly(coefs_y, i*TICK) };
+            if (points.size()<count*2) {
+                points.push(curr);
+
+                const Point speed = (curr-last) / TICK;
+                const Point acc   = (speed-lastSpeed) / TICK;
+
+                cout << "POINT: " << curr << ", Speed: " << speed << " mps, " << mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+                last      = curr;
+                lastSpeed = speed;
+            }
+        }
+        return points;
+    }
+
+    Points keepLineFrenet(const CarState& carState, const int lane=2) {
+        // go from the current state to state with the same d, s+10, speed : 10
+        const double T    = 1;      // reach the target speed within this time
+        const int count   = T/TICK; // how many points?
+        
+        double startS = carState.car_s;
+        double startD = carState.car_d;
+        
+        double startS_dot = carState.car_speed;
+        double startD_dot = 0;
+        
+        double startS_dot_dot = 0;
+        double startD_dot_dot = 0;
+
+        // use previously generated points, when present
+        Points points = carState.previous_pathXY;
+        if (points.size()) {
+            startS     = carState.end_path_s;
+            startD     = carState.end_path_d;
+            startS_dot = (points[points.size()-1]-points[points.size()-2]).abs()/TICK;// assume 100% of speed goes to s
+        }
+
+        const double endS = startS + TARGET_SPEED*T, endD = lane * 4 - 2;
+
+        const double endS_dot = TARGET_SPEED, endD_dot = 0;
+
+        const double endS_dot_dot = 0, endD_dot_dot = 0;
+
+        const auto coefs_s = JMT({startS, startS_dot, startS_dot_dot}, {endS, endS_dot, endS_dot_dot}, T);
+        const auto coefs_d = JMT({startD, startD_dot, startD_dot_dot}, {endD, endD_dot, endD_dot_dot}, T);
+        
+        cout << "STATE: " << carState << ", Start: " << getXY(startS, startD) << startS << ", " << startD << ", end: " << endS << ", sp: " << startS_dot << endl;
+
         if (points.size()<count/2) {
-            Point last = startXY;
-            Point lastSpeed = startXY_dot;
-            for (size_t i=1; i<count; ++i) {
-                const Point curr = {poly(coefs_x, i*TICK), poly(coefs_y, i*TICK) };
+            Point last      = getXY(startS, startD);
+            Point lastSpeed = {startS_dot, startD_dot};
+            for (size_t i=1; i<=count; ++i) {
+                const double currS = poly(coefs_s, i*TICK);
+                const double currD = poly(coefs_d, i*TICK);
+                const Point curr   = getXY(currS, currD);
                 if (points.size()<count*2) {
                     points.push(curr);
-                
+
                     const Point speed = (curr-last) / TICK;
                     const Point acc   = (speed-lastSpeed) / TICK;
 
@@ -442,6 +518,7 @@ public:
         }
         return points;
     }
+
     
     Points keepLineSimple(const CarState& carState, const int lane=2) { // 1: left lane; 2: middle lane; 3: right lane
         // go from the current state to state with the same d, s+10, speed : 10
@@ -474,7 +551,7 @@ public:
             pos.x += dist_inc*cos(angle+(i+1)*(pi()/100));
             pos.y += dist_inc*sin(angle+(i+1)*(pi()/100));
             points.push(pos);
-            
+
             if (i) {
                 const double speed = (pos-points[points.size()-2]).abs() / TICK;
                 cout << pos.x << ", " << pos.y << ", Speed: " << speed << "mps, " << mps2mph(speed) << "mph" << endl;
@@ -484,6 +561,14 @@ public:
         return points;
     }
     
+    Points constantAcceleration(const Point &startXY, const Point &startXY_dot, const Point &startXY_dot_dot, const Point &endXY, const Point &endXY_dot, const Point &endXY_dot_dot, const double T) {
+        Points points;
+        for (double t = 0; t<T+TICK/2; t += TICK) {
+            //points.x.push_back();
+        }
+        return points;
+    }
+
     Point getXY(const double s, const double d) const {
         return Point::fromArray(::getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y));
     }
