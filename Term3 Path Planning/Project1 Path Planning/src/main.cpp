@@ -53,7 +53,6 @@ double distance(double x1, double y1, double x2, double y2)
 }
 int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)
 {
-
 	double closestLen = 100000; //large number
 	int closestWaypoint = 0;
 
@@ -71,12 +70,10 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
 	}
 
 	return closestWaypoint;
-
 }
 
 int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
 {
-
 	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
 
 	double map_x = maps_x[closestWaypoint];
@@ -92,7 +89,6 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
 	}
 
 	return closestWaypoint;
-
 }
 
 // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
@@ -141,7 +137,6 @@ vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x
 	frenet_s += distance(0,0,proj_x,proj_y);
 
 	return {frenet_s,frenet_d};
-
 }
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
@@ -287,7 +282,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 45;
+    const double TARGET_SPEED_MPH = 46;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -455,7 +450,11 @@ public:
     }
 
     void setMaxSpeed(const Road &road, const double maxSpeed, const double maxAcc, const double T) {
-        desiredEndSpeed = min(desiredEndSpeed, maxSpeed); // keep reducing speed with each additional restriction
+        if (maxSpeed < desiredEndSpeed) {
+            desiredEndSpeed = min(desiredEndSpeed, maxSpeed); // keep reducing speed with each additional restriction
+            cout << "REDUCE " << desiredEndSpeed << "->" << maxSpeed << endl;
+            desiredEndSpeed = maxSpeed;
+        }
         endS = startS + desiredEndSpeed * T;
 
         // can we reach the destination within the max acceleration?
@@ -468,7 +467,7 @@ public:
         const double minS = startS + startXY_dot.abs() * T - 0.5*maxAcc * T * T;
         if (endS < minS) {
             endS = minS;
-            // increase destination speed, as cannot slow down that fast
+            // increase destination speed, as we cannot slow down that fast
             desiredEndSpeed = max(desiredEndSpeed, startXY_dot.abs()-maxAcc * T);
         }
 
@@ -528,72 +527,75 @@ public:
 
     Points keepLineXY(const CarState& carState, const int lane) {
         // go from the current state to state with the same d, s+10, speed : 10
-        const double T       = 1.5;    // reach the target speed within this time
+        double T = 1.5;    // reach the target speed within this time
         const int count      = T/TICK; // how many points?
         const double MAX_ACC = 3;      // do not exceed this acceleration
+        double targetSpeed   = road_.TARGET_SPEED;
 
-        // use previously generated points, when present
-        Points points = carState.previous_pathXY;
-        if (points.size()>count/2) {
-            ///cout << "("<<points.size()<<") ";
-            return points; // keep following the earlier generated path
-        }
-
-        StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
-
-        // can we reach the destination within the max acceleration?
-        startEnd.setMaxSpeed(road_, road_.TARGET_SPEED, MAX_ACC, T);
-
-        // reduce the speed if there is a car in front
-        const OtherCar other = carState.nearestFrontCar(lane, carState.s, road_);
-        if (other.isValid()) {
-            const double SAFE_TIME = 4;
-            const double s = other.predictS(T-SAFE_TIME);
-            if (s < startEnd.endS) {
-                startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-2, MAX_ACC, T);
+        // try trajectories
+        for (int i=0; i<20; ++i, T += 0.1, targetSpeed -= 0.5) {
+            // use previously generated points, when present
+            Points points = carState.previous_pathXY;
+            if (points.size()>count/2) {
+                return points; // keep following the earlier generated path
             }
-/*                cout << "[D " << startEnd.endS - s << "] -> " << Road::mps2mph((other.speedXY.abs()-2)) << endl;
-                // there is another car within N seconds, go a little slower than it
-                startEnd.setMaxSpeed(road_, other.speedXY.abs()-2, MAX_ACC, T);
-            }   else {
-                const double s = other.predictS(T-SAFE_TIME-1);
+            
+            StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
+            
+            // can we reach the destination within the max acceleration?
+            startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
+            
+            // reduce the speed if there is a car in front
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s, road_);
+            if (other.isValid()) {
+                const double SAFE_TIME = 4;
+                const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
-                    cout << "[~ " << startEnd.endS - s << "] -> " << Road::mps2mph((startEnd.startXY_dot.abs()+other.speedXY.abs())/2) << endl;
-                    // there is another car within N+1 seconds, match its speed
                     startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-2, MAX_ACC, T);
                 }
             }
-  */      }
-
-        return buildTrajectory(points, startEnd, T);
-    }
-
-    Points changeLine(const CarState& carState, const int lane) {
-        const double T       = 3; // reach the target speed within this time
-        const double MAX_ACC = 1; // do not exceed this acceleration
-
-        Points points = carState.previous_pathXY;
-        // shorten previous path
-        //points.trim(20);
-
-        StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
-        //startEnd.setMaxSpeed(road_, startEnd.startXY_dot.abs(), MAX_ACC, T);
-        startEnd.setMaxSpeed(road_, road_.TARGET_SPEED, MAX_ACC, T);
-        startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2);
-
-        const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
-        if (other.isValid()) {
-            const double SAFE_TIME = 3;
-            const double s = other.predictS(T-SAFE_TIME);
-            if (s < startEnd.endS) {
-                cout << "cant change to " << lane << endl;
-                return {}; // another car is too close
+            
+            const Points res = buildTrajectory(points, startEnd, T);
+            if (res.size()) {
+                return res;
             }
         }
 
-        lane_      = lane;
-        safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        return buildTrajectory(points, startEnd, T);
+        cout << "ERROR" << endl;
+        return {};
+    }
+
+    Points changeLine(const CarState& carState, const int lane) {
+        const double T       = 2.5; // reach the target speed within this time
+        const double MAX_ACC = 1;   // do not exceed this acceleration
+        double targetSpeed   = road_.TARGET_SPEED;
+
+        // try trajectories
+        for (int i=0; i<10; ++i, targetSpeed -= 1) {
+            Points points = carState.previous_pathXY;
+
+            StartEnd startEnd   (road_, carState, points, TICK, road_.lineCenter(lane));
+            startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
+            startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2);
+            
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
+            if (other.isValid()) {
+                const double SAFE_TIME = 4;
+                const double s = other.predictS(T-SAFE_TIME);
+                if (s < startEnd.endS) {
+                    return {}; // another car is too close
+                }
+            }
+            
+            lane_      = lane;
+            safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            
+            const Points res = buildTrajectory(points, startEnd, T);
+            if (res.size()) {
+                return res;
+            }
+        }
+        return {}; // do not change the lane at this time
     }
 
     Points buildTrajectory(Points points, const StartEnd &startEnd, const double T) {
@@ -615,11 +617,12 @@ public:
             const Point curr = {poly(coefs_x, t), poly(coefs_y, t) };
             const Point speed = (curr-last) / TICK;
             const Point acc   = (speed-lastSpeed) / TICK;
-            if ((speed.abs() > road_.TARGET_SPEED+0.4)/* ||
-                (acc.abs() > 9)*/) {
+            if ((speed.abs() > road_.TARGET_SPEED+1.5)/* ||
+                (acc.abs() > 4.8)*/) {
                 cout << "TOO FAST: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
                 //t -= TICK/200; // reduce the step, so we can reach it with smaller speed
                 //continue;
+                return Points();
             }
 
             points.push(curr);
