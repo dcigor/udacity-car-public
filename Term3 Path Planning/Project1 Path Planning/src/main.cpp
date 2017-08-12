@@ -205,6 +205,9 @@ vector<double> JMT(const vector<double> &start, const vector<double> &end, const
     return {si, si_d, 0.5*si_dd, x[0], x[1], x[2]};
 }
 
+// everything above is Udacity template
+
+// 2D point
 struct Point {
     double x, y;
     
@@ -233,6 +236,7 @@ struct Point {
     }
 };
 
+// collection of 2D points
 struct Points {
     vector<double> x;
     vector<double> y;
@@ -276,6 +280,8 @@ struct Points {
 
 class Road {
 public:
+    
+    // unit conversions between miles per hour and meters per second
     static double mph2mps(const double mph) {
         return mph * 1609 / 3600;
     }
@@ -340,15 +346,16 @@ struct OtherCar {
         car.d         = v[6];
         return car;
     }
-    
+
     static OtherCar createInvalid() {
         OtherCar car;
         car.id = -1;
         return car;
     }
-    
+
     bool isValid() const {return id >= 0;}
-    
+
+    // predict where the can will be in "t" seconds
     double predictS(const double t) const {
         // assume the car goes straight in the lane
         return s + t*speedXY.abs();
@@ -392,7 +399,8 @@ struct CarState {
         carState.sensor_fusion = sensor_fusion;
         return carState;
     }
-    
+
+    // find the nears car in front of us, in the given lane
     OtherCar nearestFrontCar(const int lane, const double s, const Road &road) const {
         OtherCar other = OtherCar::createInvalid();
         for (const auto v : sensor_fusion) {
@@ -420,6 +428,7 @@ struct CarState {
     }
 };
 
+// start and end points of the trajectory
 class StartEnd {
 public:
     StartEnd(const Road &road, const CarState &carState, const Points &points, const double in_TICK, const double in_endD) : TICK_(in_TICK) {
@@ -428,7 +437,7 @@ public:
         startXY         = carState.xy;
         startXY_dot     = {carState.speed * cos(carState.yaw), carState.speed * sin(carState.yaw)};
         startXY_dot_dot = {0, 0};
-        desiredEndSpeed = 1000000;
+        desiredEndSpeed = 1000;
 
         if (points.size()>2) {
             startS                = carState.end_path_s;
@@ -440,7 +449,7 @@ public:
             const Point prev_prev = points[points.size()-3];
             const Point prevSpeed = (prev-prev_prev)/TICK_;
             startXY_dot_dot       = (startXY_dot-prevSpeed)/TICK_;
-            
+
             if ((road.getXY(startS, startD)-startXY).abs() > 0.01) {
                 cout << "ERR " << (road.getXY(startS, startD)-startXY).abs() << endl;
             }
@@ -449,13 +458,10 @@ public:
         endD = in_endD;
     }
 
+    // update the end point to make sure it can be reached given the speed and acceleration
     void setMaxSpeed(const Road &road, const double maxSpeed, const double maxAcc, const double T) {
-        if (maxSpeed < desiredEndSpeed) {
-            desiredEndSpeed = min(desiredEndSpeed, maxSpeed); // keep reducing speed with each additional restriction
-            cout << "REDUCE " << desiredEndSpeed << "->" << maxSpeed << endl;
-            desiredEndSpeed = maxSpeed;
-        }
-        endS = startS + desiredEndSpeed * T;
+        desiredEndSpeed = min(desiredEndSpeed, maxSpeed); // keep reducing speed with each additional restriction
+        endS            = startS + desiredEndSpeed * T;
 
         // can we reach the destination within the max acceleration?
         const double maxS = startS + startXY_dot.abs() * T + 0.5*maxAcc * T * T;
@@ -474,6 +480,7 @@ public:
         setMaxEndS(road, endS);
     }
 
+    // set or move back the end point
     void setMaxEndS(const Road &road, const double in_endS) {
         if (in_endS <= endS) {
             endS = in_endS;
@@ -499,6 +506,7 @@ private:
     const double TICK_;
 };
 
+// represents the AI driver of a particular car. 
 class Driver {
 public:
     const double TICK = 0.02; // 20 ms between points
@@ -507,7 +515,10 @@ public:
 
     Points drive(const CarState& carState) {
         const auto now = std::chrono::steady_clock::now();
+
+        // wait 10 seconds between lane changes to allow forward progree in the new lane
         if ((carState.speed>10) && (std::chrono::duration_cast<std::chrono::seconds>(now-safe_time_).count() > 0)) {
+            // move to the right lane when possible
             if (lane_ != 3) {
                 const Points points = changeLine(carState, lane_+1);
                 if (points.size() > 0) {
@@ -515,6 +526,7 @@ public:
                 }
             }
 
+            // when driving is slow: switch to the left lane to pass
             if ((lane_ != 1) && (carState.speed < road_.TARGET_SPEED-3)) {
                 const Points points = changeLine(carState, lane_-1);
                 if (points.size() > 0) {
@@ -522,15 +534,18 @@ public:
                 }
             }
         }
+
+        // when no lane change was possible, keep the lane
         return keepLineXY(carState, lane_);
     }
 
+    // keep the current lane in xy coordinates
     Points keepLineXY(const CarState& carState, const int lane) {
         // go from the current state to state with the same d, s+10, speed : 10
-        double T = 1.5;    // reach the target speed within this time
+        double T = 1.5;                // reach the target speed within this time
         const int count      = T/TICK; // how many points?
-        const double MAX_ACC = 3;      // do not exceed this acceleration
-        double targetSpeed   = road_.TARGET_SPEED;
+        const double MAX_ACC = 2.5;    // do not exceed this acceleration
+        double targetSpeed   = road_.TARGET_SPEED; // approach this speed
 
         // try trajectories
         for (int i=0; i<20; ++i, T += 0.1, targetSpeed -= 0.5) {
@@ -539,10 +554,11 @@ public:
             if (points.size()>count/2) {
                 return points; // keep following the earlier generated path
             }
-            
+
+            // generate start and end points of the trajectory
             StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
             
-            // can we reach the destination within the max acceleration?
+            // can we reach the destination at the targetSpeed within the max acceleration?
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
             
             // reduce the speed if there is a car in front
@@ -551,33 +567,35 @@ public:
                 const double SAFE_TIME = 4;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
-                    startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-2, MAX_ACC, T);
+                    // reduce the speed to the speed of the car in front. weighed average
+                    startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+2*other.speedXY.abs())/3-2, MAX_ACC, T);
                 }
             }
-            
+
             const Points res = buildTrajectory(points, startEnd, T);
             if (res.size()) {
                 return res;
             }
         }
 
-        cout << "ERROR" << endl;
+        cout << "ERROR" << carState << endl;
         return {};
     }
 
     Points changeLine(const CarState& carState, const int lane) {
-        const double T       = 2.5; // reach the target speed within this time
-        const double MAX_ACC = 1;   // do not exceed this acceleration
+        double T = 2;             // reach the target speed within this time
+        const double MAX_ACC = 1; // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED;
 
         // try trajectories
-        for (int i=0; i<10; ++i, targetSpeed -= 1) {
+        for (int i=0; i<10; ++i, T += 0.1, targetSpeed -= 0.3) {
             Points points = carState.previous_pathXY;
 
             StartEnd startEnd   (road_, carState, points, TICK, road_.lineCenter(lane));
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
             startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2);
-            
+
+            // dont change the lane if the target lane is occupied
             const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
             if (other.isValid()) {
                 const double SAFE_TIME = 4;
@@ -586,7 +604,7 @@ public:
                     return {}; // another car is too close
                 }
             }
-            
+
             lane_      = lane;
             safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(10);
             
@@ -599,41 +617,25 @@ public:
     }
 
     Points buildTrajectory(Points points, const StartEnd &startEnd, const double T) {
-        const int count    = T/TICK;
+        const int  count   = T/TICK;
         const auto coefs_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const auto coefs_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
-            
-        string s = to_string(coefs_x[0]) + "+" +        to_string(coefs_x[1]) + "*x + "      + to_string(coefs_x[2]) + "*x*x + " +
-                       to_string(coefs_x[3]) + "*x*x*x + "+ to_string(coefs_x[4]) + "*x*x*x*x +" + to_string(coefs_x[5]) + "*x*x*x*x*x";
 
-        cout << s << endl;
-        cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
-        cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
-        cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
-
-        Point last      = startEnd.startXY;
-        Point lastSpeed = startEnd.startXY_dot;
-        for (double t   = TICK; t < T && points.size()<count*2; ) {
-            const Point curr = {poly(coefs_x, t), poly(coefs_y, t) };
-            const Point speed = (curr-last) / TICK;
-            const Point acc   = (speed-lastSpeed) / TICK;
-            if ((speed.abs() > road_.TARGET_SPEED+1.5)/* ||
-                (acc.abs() > 4.8)*/) {
-                cout << "TOO FAST: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
-                //t -= TICK/200; // reduce the step, so we can reach it with smaller speed
-                //continue;
-                return Points();
+        Point lastXY  = startEnd.startXY;
+        for (double t = TICK; t < T && points.size()<count*2; t += TICK) {
+            const Point currXY = {poly(coefs_x, t), poly(coefs_y, t) };
+            const Point speed  = (currXY-lastXY) / TICK;
+            if ((speed.abs() > road_.TARGET_SPEED+1)) {
+                return {}; // reject this trajectory
             }
 
-            points.push(curr);
-            cout << "POINT: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
-            last      = curr;
-            lastSpeed = speed;
-            t        += TICK;
+            points.push(currXY);
+            lastXY = currXY;
         }
         return points;
     }
 
+    // evaluate the value of the polynomial with given coefficients at the given point
     double poly(const vector<double> &coeffs, const double x) const {
         double res = 0, arg = 1;
         for (const double coef : coeffs) {
@@ -644,7 +646,7 @@ public:
     }
 private:
     Road road_;
-    int lane_ = 2;
+    int lane_ = 2; // apparently the simulator always starts in lane 2
     std::chrono::time_point<std::chrono::steady_clock> safe_time_ = std::chrono::steady_clock::now();
 };
 
@@ -679,7 +681,6 @@ int main() {
           	msgJson["next_y"] = points.y;
 
           	const auto msg = "42[\"control\","+ msgJson.dump()+"]";
-            //cout << msg << endl;
 
           	//this_thread::sleep_for(chrono::milliseconds(1000));
           	ws UWS_MEMBER send(msg.data(), msg.length(), uWS::OpCode::TEXT);
