@@ -168,7 +168,6 @@ vector<double> getXY(const double s, const double d, const vector<double> &maps_
 	double y = seg_y + d*sin(perp_heading);
 
 	return {x,y};
-
 }
 
 vector<double> JMT(const vector<double> &start, const vector<double> &end, const double T) {
@@ -269,6 +268,15 @@ struct Points {
             y.pop_back();
         }
     }
+    
+    friend ostream& operator<<(ostream& os, const Points& points) {
+        os << "[";
+        for (size_t i=0; i<points.size(); ++i) {
+            os << points[i].x;
+        }
+        os << "]";
+        return os;
+    }
 };
 
 class Road {
@@ -279,7 +287,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 48;
+    const double TARGET_SPEED_MPH = 45;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -289,7 +297,7 @@ public:
     }
 
     // loads waypoints on start
-    Road(const string &filename) {
+    Road(const string &filename, const double in_max_s) : max_s(in_max_s) {
         // Waypoint map to read from
         ifstream in_map_(filename.c_str(), ifstream::in);
 
@@ -310,6 +318,8 @@ public:
     Point getXY(const double s, const double d) const {
         return Point::fromArray(::getXY(s, d, map_waypoints_s_, map_waypoints_x_, map_waypoints_y_));
     }
+
+    const double max_s;
 private:
     vector<double> map_waypoints_x_;
     vector<double> map_waypoints_y_;
@@ -378,11 +388,11 @@ struct CarState {
 
         const vector<double> previous_path_x = j[1]["previous_path_x"];
         const vector<double> previous_path_y = j[1]["previous_path_y"];
-        carState.previous_pathXY.x = previous_path_x;
-        carState.previous_pathXY.y = previous_path_y;
-        carState.end_path_s        = j[1]["end_path_s"];
-        carState.end_path_d        = j[1]["end_path_d"];
-        
+        carState.previous_pathXY.x           = previous_path_x;
+        carState.previous_pathXY.y           = previous_path_y;
+        carState.end_path_s                  = j[1]["end_path_s"];
+        carState.end_path_d                  = j[1]["end_path_d"];
+
         const vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
         carState.sensor_fusion = sensor_fusion;
         return carState;
@@ -407,24 +417,27 @@ struct CarState {
         }
         return other;
     }
-    
+
     friend ostream& operator<<(ostream& os, const CarState& s) {
-        os << s.xy << ", s: " << s.s << ", d: " << s.d << ", ya: " << s.yaw << ", sp: " << s.speed;
+        os << "{" << s.xy << ", s: " << s.s << ", d: " << s.d << ", ya: " << s.yaw << ", sp: " << s.speed << ", end s: " <<
+            s.end_path_s << ", d: " << s.end_path_d << "}";
         return os;
     }
 };
 
 class StartEnd {
 public:
-    StartEnd(const CarState &carState, const Points &points, const double in_TICK, const double in_endD) : TICK_(in_TICK) {
+    StartEnd(const Road &road, const CarState &carState, const Points &points, const double in_TICK, const double in_endD) : TICK_(in_TICK) {
+        startS          = carState.s;
+        startD          = carState.d;
         startXY         = carState.xy;
         startXY_dot     = {carState.speed * cos(carState.yaw), carState.speed * sin(carState.yaw)};
         startXY_dot_dot = {0, 0};
         desiredEndSpeed = 1000000;
 
-        startS = carState.s;
         if (points.size()>2) {
             startS                = carState.end_path_s;
+            startD                = carState.end_path_d;
             startXY               = points[points.size()-1];
             const Point prev      = points[points.size()-2];
             startXY_dot           = (startXY-prev)/TICK_;
@@ -432,6 +445,10 @@ public:
             const Point prev_prev = points[points.size()-3];
             const Point prevSpeed = (prev-prev_prev)/TICK_;
             startXY_dot_dot       = (startXY_dot-prevSpeed)/TICK_;
+            
+            if ((road.getXY(startS, startD)-startXY).abs() > 0.01) {
+                cout << "ERR " << (road.getXY(startS, startD)-startXY).abs() << endl;
+            }
         }
 
         endD = in_endD;
@@ -448,23 +465,35 @@ public:
             // reduce destination speed
             desiredEndSpeed = min(maxSpeed, startXY_dot.abs()+maxAcc * T);
         }
+        const double minS = startS + startXY_dot.abs() * T - 0.5*maxAcc * T * T;
+        if (endS < minS) {
+            endS = minS;
+            // increase destination speed, as cannot slow down that fast
+            desiredEndSpeed = max(desiredEndSpeed, startXY_dot.abs()-maxAcc * T);
+        }
 
-        const double endS_prev = endS - desiredEndSpeed * TICK_; // the point before the last point in the future
+        setMaxEndS(road, endS);
+    }
 
-        endXY = road.getXY(endS, endD);
-        const auto endXY_prev = road.getXY(endS_prev, endD);
-        const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
+    void setMaxEndS(const Road &road, const double in_endS) {
+        if (in_endS <= endS) {
+            endS = in_endS;
+            const double endS_prev = endS - desiredEndSpeed * TICK_; // the point before the last point in the future
 
-        endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
+            endXY = road.getXY(endS, endD);
+            const auto endXY_prev = road.getXY(endS_prev, endD);
+            const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
+            
+            endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
+        }
     }
 
     Point startXY;
     Point startXY_dot;
     Point startXY_dot_dot = {0, 0};
-    
     Point endXY, endXY_dot, endXY_dot_dot = {0,0};
-    double startS;
 
+    double startS, startD;
     double desiredEndSpeed;
     double endS, endD;
 private:
@@ -499,9 +528,9 @@ public:
 
     Points keepLineXY(const CarState& carState, const int lane) {
         // go from the current state to state with the same d, s+10, speed : 10
-        const double T       = 2;      // reach the target speed within this time
+        const double T       = 1.5;    // reach the target speed within this time
         const int count      = T/TICK; // how many points?
-        const double MAX_ACC = 2;      // do not exceed this acceleration
+        const double MAX_ACC = 3;      // do not exceed this acceleration
 
         // use previously generated points, when present
         Points points = carState.previous_pathXY;
@@ -510,7 +539,7 @@ public:
             return points; // keep following the earlier generated path
         }
 
-        StartEnd startEnd(carState, points, TICK, road_.lineCenter(lane));
+        StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
 
         // can we reach the destination within the max acceleration?
         startEnd.setMaxSpeed(road_, road_.TARGET_SPEED, MAX_ACC, T);
@@ -521,7 +550,9 @@ public:
             const double SAFE_TIME = 4;
             const double s = other.predictS(T-SAFE_TIME);
             if (s < startEnd.endS) {
-                cout << "[D " << startEnd.endS - s << "] -> " << Road::mps2mph((other.speedXY.abs()-2)) << endl;
+                startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-2, MAX_ACC, T);
+            }
+/*                cout << "[D " << startEnd.endS - s << "] -> " << Road::mps2mph((other.speedXY.abs()-2)) << endl;
                 // there is another car within N seconds, go a little slower than it
                 startEnd.setMaxSpeed(road_, other.speedXY.abs()-2, MAX_ACC, T);
             }   else {
@@ -529,31 +560,32 @@ public:
                 if (s < startEnd.endS) {
                     cout << "[~ " << startEnd.endS - s << "] -> " << Road::mps2mph((startEnd.startXY_dot.abs()+other.speedXY.abs())/2) << endl;
                     // there is another car within N+1 seconds, match its speed
-                    startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2, MAX_ACC, T);
+                    startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-2, MAX_ACC, T);
                 }
             }
-        }
+  */      }
 
         return buildTrajectory(points, startEnd, T);
     }
 
     Points changeLine(const CarState& carState, const int lane) {
-        const double T       = 4; // reach the target speed within this time
+        const double T       = 3; // reach the target speed within this time
         const double MAX_ACC = 1; // do not exceed this acceleration
 
         Points points = carState.previous_pathXY;
         // shorten previous path
-        points.trim(20);
+        //points.trim(20);
 
-        StartEnd startEnd(carState, points, TICK, road_.lineCenter(lane));
-        startEnd.setMaxSpeed(road_, road_.TARGET_SPEED        , MAX_ACC, T);
-        startEnd.setMaxSpeed(road_, startEnd.startXY_dot.abs(), MAX_ACC, T);
+        StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
+        //startEnd.setMaxSpeed(road_, startEnd.startXY_dot.abs(), MAX_ACC, T);
+        startEnd.setMaxSpeed(road_, road_.TARGET_SPEED, MAX_ACC, T);
+        startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2);
 
         const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
         if (other.isValid()) {
-            const double SAFE_TIME = 2;
+            const double SAFE_TIME = 3;
             const double s = other.predictS(T-SAFE_TIME);
-            if (startEnd.endS > s) {
+            if (s < startEnd.endS) {
                 cout << "cant change to " << lane << endl;
                 return {}; // another car is too close
             }
@@ -568,29 +600,34 @@ public:
         const int count    = T/TICK;
         const auto coefs_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const auto coefs_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
-    
-        ///cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
+            
+        string s = to_string(coefs_x[0]) + "+" +        to_string(coefs_x[1]) + "*x + "      + to_string(coefs_x[2]) + "*x*x + " +
+                       to_string(coefs_x[3]) + "*x*x*x + "+ to_string(coefs_x[4]) + "*x*x*x*x +" + to_string(coefs_x[5]) + "*x*x*x*x*x";
 
-        Point last = startEnd.startXY;
+        cout << s << endl;
+        cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
+        cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
+        cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
+
+        Point last      = startEnd.startXY;
         Point lastSpeed = startEnd.startXY_dot;
-        for (size_t i=1; i<=count; ++i) {
-            const Point curr = {poly(coefs_x, i*TICK), poly(coefs_y, i*TICK) };
-            if (points.size()<count*2) {
-                const Point speed = (curr-last) / TICK;
-                const Point acc   = (speed-lastSpeed) / TICK;
-                if (speed.abs() > road_.TARGET_SPEED+2) {
-                    cout << "TOO FAST: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
-                    //break;
-                }
-                
-                points.push(curr);
-                
-                ///cout << "POINT: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
-                last      = curr;
-                lastSpeed = speed;
+        for (double t   = TICK; t < T && points.size()<count*2; ) {
+            const Point curr = {poly(coefs_x, t), poly(coefs_y, t) };
+            const Point speed = (curr-last) / TICK;
+            const Point acc   = (speed-lastSpeed) / TICK;
+            if ((speed.abs() > road_.TARGET_SPEED+0.4)/* ||
+                (acc.abs() > 9)*/) {
+                cout << "TOO FAST: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+                //t -= TICK/200; // reduce the step, so we can reach it with smaller speed
+                //continue;
             }
+
+            points.push(curr);
+            cout << "POINT: " << curr << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+            last      = curr;
+            lastSpeed = speed;
+            t        += TICK;
         }
-    
         return points;
     }
 
@@ -612,9 +649,8 @@ int main() {
     uWS::Hub h;
 
     // Load up map values for waypoint's x,y,s and d normalized normal vectors
-    Road road("../data/highway_map.csv");
+    Road road("../data/highway_map.csv", 6945.554);
     Driver driver(road);
-    const double max_s = 6945.554;
 
     h.onMessage([&driver](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -687,83 +723,4 @@ int main() {
   }
   h.run();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
