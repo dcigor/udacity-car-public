@@ -9,7 +9,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 
-#define USE_LATEST_UWS_VERSION
+//#define USE_LATEST_UWS_VERSION
 
 #ifdef USE_LATEST_UWS_VERSION
 // for the latest version of UWS
