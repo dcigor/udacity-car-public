@@ -449,10 +449,6 @@ public:
             const Point prev_prev = points[points.size()-3];
             const Point prevSpeed = (prev-prev_prev)/TICK_;
             startXY_dot_dot       = (startXY_dot-prevSpeed)/TICK_;
-
-            if ((road.getXY(startS, startD)-startXY).abs() > 0.01) {
-                cout << "ERR " << (road.getXY(startS, startD)-startXY).abs() << endl;
-            }
         }
 
         endD = in_endD;
@@ -477,11 +473,11 @@ public:
             desiredEndSpeed = max(desiredEndSpeed, startXY_dot.abs()-maxAcc * T);
         }
 
-        setMaxEndS(road, endS);
+        setMaxEndS(road, endS, T);
     }
 
     // set or move back the end point
-    void setMaxEndS(const Road &road, const double in_endS) {
+    void setMaxEndS(const Road &road, const double in_endS, const double T) {
         if (in_endS <= endS) {
             endS = in_endS;
             const double endS_prev = endS - desiredEndSpeed * TICK_; // the point before the last point in the future
@@ -491,6 +487,9 @@ public:
             const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
             
             endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
+
+            endXY_dot_dot = endXY_dot.abs() < startXY_dot.abs() ? // slowing down?
+                (endXY_dot-startXY_dot) / T / 2 : Point{0,0};         // keep constant acceleration
         }
     }
 
@@ -506,7 +505,7 @@ private:
     const double TICK_;
 };
 
-// represents the AI driver of a particular car. 
+// represents the AI driver of a particular car.
 class Driver {
 public:
     const double TICK = 0.02; // 20 ms between points
@@ -593,10 +592,10 @@ public:
 
             StartEnd startEnd   (road_, carState, points, TICK, road_.lineCenter(lane));
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
-            startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2);
+            startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2, T);
 
             // dont change the lane if the target lane is occupied
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s-25, road_);
             if (other.isValid()) {
                 const double SAFE_TIME = 4;
                 const double s = other.predictS(T-SAFE_TIME);
