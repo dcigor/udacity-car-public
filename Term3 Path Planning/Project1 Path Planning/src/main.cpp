@@ -9,7 +9,8 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 
-//#define USE_LATEST_UWS_VERSION
+#define USE_LATEST_UWS_VERSION
+#define USE_BOSCH
 
 #ifdef USE_LATEST_UWS_VERSION
 // for the latest version of UWS
@@ -288,7 +289,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 46;
+    const double TARGET_SPEED_MPH = 47;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -543,7 +544,7 @@ public:
         // go from the current state to state with the same d, s+10, speed : 10
         double T = 1.5;                // reach the target speed within this time
         const int count      = T/TICK; // how many points?
-        const double MAX_ACC = 2.5;    // do not exceed this acceleration
+        const double MAX_ACC = 3;    // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED; // approach this speed
 
         // try trajectories
@@ -563,7 +564,7 @@ public:
             // reduce the speed if there is a car in front
             const OtherCar other = carState.nearestFrontCar(lane, carState.s, road_);
             if (other.isValid()) {
-                const double SAFE_TIME = 4;
+                const double SAFE_TIME = 3;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
                     // reduce the speed to the speed of the car in front. weighed average
@@ -583,7 +584,7 @@ public:
 
     Points changeLine(const CarState& carState, const int lane) {
         double T = 2;             // reach the target speed within this time
-        const double MAX_ACC = 1; // do not exceed this acceleration
+        const double MAX_ACC = 2; // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED;
 
         // try trajectories
@@ -595,9 +596,9 @@ public:
             startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2, T);
 
             // dont change the lane if the target lane is occupied
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s-25, road_);
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s-10, road_);
             if (other.isValid()) {
-                const double SAFE_TIME = 4;
+                const double SAFE_TIME = 3;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
                     return {}; // another car is too close
@@ -620,16 +621,30 @@ public:
         const auto coefs_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const auto coefs_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
 
-        Point lastXY  = startEnd.startXY;
+        string s = to_string(coefs_x[0]) + "+" +        to_string(coefs_x[1]) + "*x + "      + to_string(coefs_x[2]) + "*x*x + " +
+        to_string(coefs_x[3]) + "*x*x*x + "+ to_string(coefs_x[4]) + "*x*x*x*x +" + to_string(coefs_x[5]) + "*x*x*x*x*x";
+        
+        cout << s << endl;
+        cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
+        cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
+        cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
+
+        Point lastXY    = startEnd.startXY;
+        Point lastSpeed = startEnd.startXY_dot;
         for (double t = TICK; t < T && points.size()<count*2; t += TICK) {
             const Point currXY = {poly(coefs_x, t), poly(coefs_y, t) };
             const Point speed  = (currXY-lastXY) / TICK;
+            const Point acc    = (speed-lastSpeed) / TICK;
             if ((speed.abs() > road_.TARGET_SPEED+1)) {
+                cout << "TOO FAST: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
                 return {}; // reject this trajectory
             }
 
+            cout << "POINT: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+
             points.push(currXY);
-            lastXY = currXY;
+            lastXY    = currXY;
+            lastSpeed = speed;
         }
         return points;
     }
@@ -653,7 +668,11 @@ int main() {
     uWS::Hub h;
 
     // Load up map values for waypoint's x,y,s and d normalized normal vectors
+#ifdef USE_BOSCH
+    Road road("../data/highway_map_bosch1.csv", 6945.554);
+#else
     Road road("../data/highway_map.csv", 6945.554);
+#endif
     Driver driver(road);
 
     h.onMessage([&driver](uWS::WebSocket<uWS::SERVER> UWS_PARAMTYPE ws, char *data, size_t length, uWS::OpCode opCode) {
