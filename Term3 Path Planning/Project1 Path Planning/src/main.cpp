@@ -506,6 +506,32 @@ private:
     const double TICK_;
 };
 
+// allows to evaluate the value of the polynomial with given coefficients at the given point
+class Polynomial {
+public:
+    Polynomial(const vector<double> &coeffs) : coeffs_(coeffs) {}
+
+    double operator() (const double x) const {
+        double res = 0, arg = 1;
+        for (const double coef : coeffs_) {
+            res += coef * arg;
+            arg *= x;
+        }
+        return res;
+    }
+    
+    friend ostream& operator<<(ostream& os, const Polynomial& s) {
+        os << s.coeffs_[0];
+        for (size_t i=1; i<s.coeffs_.size(); ++i) {
+            const double c = s.coeffs_[i];
+            os << (c<0?"":"+") << c << "*x^" << i;
+        }
+        return os;
+    }
+private:
+    const vector<double> coeffs_;
+};
+
 // represents the AI driver of a particular car.
 class Driver {
 public:
@@ -516,21 +542,30 @@ public:
     Points drive(const CarState& carState) {
         const auto now = std::chrono::steady_clock::now();
 
-        // wait 10 seconds between lane changes to allow forward progree in the new lane
+        // wait a few seconds between lane changes to allow forward progress in the new lane
         if ((carState.speed>10) && (std::chrono::duration_cast<std::chrono::seconds>(now-safe_time_).count() > 0)) {
-            // move to the right lane when possible
-            if (lane_ != 3) {
-                const Points points = changeLine(carState, lane_+1);
+            // move to the middle lane when possible
+            if (lane_ != 2) {
+                const Points points = changeLine(carState, 2);
                 if (points.size() > 0) {
                     return points;
                 }
             }
 
-            // when driving is slow: switch to the left lane to pass
-            if ((lane_ != 1) && (carState.speed < road_.TARGET_SPEED-3)) {
-                const Points points = changeLine(carState, lane_-1);
-                if (points.size() > 0) {
-                    return points;
+            if (carState.speed < road_.TARGET_SPEED-3) {
+                // when driving is slow: switch to the left lane to pass
+                if (lane_ != 1) {
+                    const Points points = changeLine(carState, lane_-1);
+                    if (points.size() > 0) {
+                        return points;
+                    }
+                }
+                // otherwise: switch to the right lane to pass
+                if (lane_ != 3) {
+                    const Points points = changeLine(carState, lane_+1);
+                    if (points.size() > 0) {
+                        return points;
+                    }
                 }
             }
         }
@@ -564,7 +599,7 @@ public:
             // reduce the speed if there is a car in front
             const OtherCar other = carState.nearestFrontCar(lane, carState.s, road_);
             if (other.isValid()) {
-                const double SAFE_TIME = 3;
+                const double SAFE_TIME = 2.5;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
                     // reduce the speed to the speed of the car in front. weighed average
@@ -595,10 +630,10 @@ public:
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
             startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2, T);
 
-            // dont change the lane if the target lane is occupied
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s-10, road_);
+            // don't change the lane if the target lane is occupied
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
             if (other.isValid()) {
-                const double SAFE_TIME = 3;
+                const double SAFE_TIME = 2.5;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
                     return {}; // another car is too close
@@ -606,7 +641,7 @@ public:
             }
 
             lane_      = lane;
-            safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(4);
             
             const Points res = buildTrajectory(points, startEnd, T);
             if (res.size()) {
@@ -618,13 +653,10 @@ public:
 
     Points buildTrajectory(Points points, const StartEnd &startEnd, const double T) {
         const int  count   = T/TICK;
-        const auto coefs_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
-        const auto coefs_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
-
-        string s = to_string(coefs_x[0]) + "+" +        to_string(coefs_x[1]) + "*x + "      + to_string(coefs_x[2]) + "*x*x + " +
-        to_string(coefs_x[3]) + "*x*x*x + "+ to_string(coefs_x[4]) + "*x*x*x*x +" + to_string(coefs_x[5]) + "*x*x*x*x*x";
+        const Polynomial poly_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
+        const Polynomial poly_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
         
-        cout << s << endl;
+        cout << poly_x << endl;
         cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
         cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
         cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
@@ -632,7 +664,7 @@ public:
         Point lastXY    = startEnd.startXY;
         Point lastSpeed = startEnd.startXY_dot;
         for (double t = TICK; t < T && points.size()<count*2; t += TICK) {
-            const Point currXY = {poly(coefs_x, t), poly(coefs_y, t) };
+            const Point currXY = {poly_x(t), poly_y(t) };
             const Point speed  = (currXY-lastXY) / TICK;
             const Point acc    = (speed-lastSpeed) / TICK;
             if ((speed.abs() > road_.TARGET_SPEED+1)) {
@@ -647,16 +679,6 @@ public:
             lastSpeed = speed;
         }
         return points;
-    }
-
-    // evaluate the value of the polynomial with given coefficients at the given point
-    double poly(const vector<double> &coeffs, const double x) const {
-        double res = 0, arg = 1;
-        for (const double coef : coeffs) {
-            res += coef * arg;
-            arg *= x;
-        }
-        return res;
     }
 private:
     Road road_;
