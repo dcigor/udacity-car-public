@@ -489,8 +489,15 @@ public:
             
             endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
 
-            endXY_dot_dot = endXY_dot.abs() < startXY_dot.abs() ? // slowing down?
-                (endXY_dot-startXY_dot) / T / 2 : Point{0,0};         // keep constant acceleration
+            if (endXY_dot.abs() < startXY_dot.abs()) {
+                // slowing down?
+                endXY_dot_dot = (endXY_dot-startXY_dot) / T / 2;
+            }   else {
+                // accelerating
+                if (endXY_dot.abs() < desiredEndSpeed-3) {
+                    
+                }
+            }
         }
     }
 
