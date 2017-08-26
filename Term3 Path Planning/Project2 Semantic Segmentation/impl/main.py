@@ -58,42 +58,40 @@ tests.test_load_vgg(load_vgg, tf)
 
 def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     """
-        Create the layers for a fully convolutional network.  Build skip-layers using the vgg layers.
-        :param vgg_layer7_out: TF Tensor for VGG Layer 3 output
-        :param vgg_layer4_out: TF Tensor for VGG Layer 4 output
-        :param vgg_layer3_out: TF Tensor for VGG Layer 7 output
-        :param num_classes: Number of classes to classify
-        :return: The Tensor for the last layer of output
-        """
+    Create the layers for a fully convolutional network.  Build skip-layers using the vgg layers.
+    :param vgg_layer7_out: TF Tensor for VGG Layer 3 output
+    :param vgg_layer4_out: TF Tensor for VGG Layer 4 output
+    :param vgg_layer3_out: TF Tensor for VGG Layer 7 output
+    :param num_classes: Number of classes to classify
+    :return: The Tensor for the last layer of output
+    """
     #udacity suggestion
-    vgg_layer7 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='SAME',
-                              kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    vgg_layer7 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='SAME', 
+                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
 
     # similar for vgg_layer4 and vgg_layer3 taking the corresponding vgg_layer4_out and vgg_layer3_out
-    vgg_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='SAME',
-                                kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-    vgg_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='SAME',
-                                kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    vgg_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='SAME', 
+                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    vgg_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='SAME', 
+                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
 
     #7
     fcn_layer7 = tf.layers.conv2d_transpose(vgg_layer7, num_classes, 4, 2, 'SAME',
                                           kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-
-    combined_layer7 = tf.add(vgg_layer7, fcn_layer7)
-
+    
     #4
-    fcn_layer4 = tf.layers.conv2d_transpose(combined_layer7, num_classes, 4, 2, 'SAME',
-                                          kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-    combined_layer4 = tf.add(vgg_layer4, fcn_layer4)
-
+    fcn_layer4 = tf.layers.conv2d_transpose(fcn_layer7, num_classes, 4, 2, 'SAME',
+                                            kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    combined_layer4 = tf.add(vgg_layer4, fcn_layer7)
+    
     #3
     fcn_layer3 = tf.layers.conv2d_transpose(combined_layer4, num_classes, 4, 2, 'SAME',
-                                          kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+                                            kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
     combined_layer3 = tf.add(vgg_layer3, fcn_layer3)
-    output = tf.layers.conv2d_transpose(combined_layer3, num_classes, 16, 8, 'SAME',
-                                      kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    output = tf.layers.conv2d_transpose(combined_layer3, num_classes, 16, 8, 'SAME',                                               
+                                        kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
     return output
-
+                                    
 tests.test_layers(layers)
 
 def optimize(nn_last_layer, correct_label, learning_rate, num_classes):

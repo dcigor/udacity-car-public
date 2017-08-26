@@ -495,7 +495,7 @@ public:
             }   else {
                 // accelerating
                 if (endXY_dot.abs() < desiredEndSpeed-3) {
-                    
+                    endXY_dot_dot = (endXY_dot-startXY_dot) / T;
                 }
             }
         }
