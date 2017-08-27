@@ -211,7 +211,7 @@ vector<double> JMT(const vector<double> &start, const vector<double> &end, const
 // 2D point
 struct Point {
     double x, y;
-    
+
     static Point fromArray(const vector<double> &a) {
         Point p;
         p.x = a[0];
@@ -236,8 +236,8 @@ struct Point {
         return sqrt(x*x+y*y);
     }
 
-    // normalized vector: same direction, but unit length
-    Point norm() const {
+    // unitize vector: same direction, but unit length
+    Point unit() const {
         const double magnitude = abs();
         return {x/magnitude, y/magnitude};
     }
@@ -280,6 +280,10 @@ struct Points {
         }
     }
     
+    operator bool() const {
+        return !x.empty();
+    }
+
     friend ostream& operator<<(ostream& os, const Points& points) {
         os << "[";
         for (size_t i=0; i<points.size(); ++i) {
@@ -300,7 +304,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 47.5;
+    const double TARGET_SPEED_MPH = 46.5;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -366,6 +370,8 @@ struct OtherCar {
     }
 
     bool isValid() const {return id >= 0;}
+    
+    operator bool() const {return isValid();}
 
     // predict where the can will be in "t" seconds
     double predictS(const double t) const {
@@ -412,7 +418,7 @@ struct CarState {
         return carState;
     }
 
-    // find the nears car in front of us, in the given lane
+    // find the nearest car in front of us, in the given lane
     OtherCar nearestFrontCar(const int lane, const double s, const Road &road) const {
         OtherCar other = OtherCar::createInvalid();
         for (const auto v : sensor_fusion) {
@@ -427,6 +433,27 @@ struct CarState {
             }
             
             if (!other.isValid() || curr.s < other.s) {
+                other = curr;
+            }
+        }
+        return other;
+    }
+
+    // find the nearest car behind us, in the given lane
+    OtherCar nearestBehindCar(const int lane, const double s, const Road &road) const {
+        OtherCar other = OtherCar::createInvalid();
+        for (const auto v : sensor_fusion) {
+            const OtherCar curr = OtherCar::initFromVector(v);
+            if (curr.s > s) {
+                continue; // this car is in front. ignore it for now
+            }
+            
+            const double lineCenter = road.lineCenter(lane);
+            if (abs(curr.d-lineCenter) > road.LANE_WIDTH/2) {
+                continue; // this car is in another line - ignore it
+            }
+
+            if (!other.isValid() || curr.s > other.s) {
                 other = curr;
             }
         }
@@ -493,28 +520,17 @@ public:
     // set or move back the end point
     void setMaxEndS(const Road &road, const double in_endS, const double T) {
         if (in_endS <= endS) {
-            endS = in_endS;
-            const double endS_prev = endS - desiredEndSpeed * TICK_; // the point before the last point in the future
-
+            endS  = in_endS;
             endXY = road.getXY(endS, endD);
-            const auto endXY_prev = road.getXY(endS_prev, endD);
-            //const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
-            const double endYaw   = atan2(endXY.y-startXY.y, endXY.x-startXY.x);
 
+            const double endYaw = atan2(endXY.y-startXY.y, endXY.x-startXY.x);
             endXY_dot = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
 
-            if (abs(desiredEndSpeed-targetEndSpeed_) > 1) {
-                endXY_dot_dot = (endXY_dot-startXY_dot).norm() * max_acc_;
-            }
-            /*
-            if (endXY_dot.abs() < startXY_dot.abs()) {
-                // slowing down?
-                endXY_dot_dot = (endXY_dot-startXY_dot) / T / 2;
+            if (abs(desiredEndSpeed-targetEndSpeed_) > 2) {
+                endXY_dot_dot = (endXY_dot-startXY_dot).unit() * max_acc_;
             }   else {
-                // accelerating
-                endXY_dot_dot = (endXY_dot-startXY_dot).norm() * max_acc_;
+                endXY_dot_dot = (endXY_dot-startXY_dot).unit() * max_acc_ / 10;
             }
-             */
         }
     }
 
@@ -565,14 +581,20 @@ public:
     Driver(const Road &road) : road_(road) {}
 
     Points drive(const CarState& carState) {
-        const auto now = std::chrono::steady_clock::now();
+        init(carState);
+
+        Points points = carState.previous_pathXY;
+        if (points.size()>0.3/TICK) {
+            return points; // keep following the earlier-generated path
+            // TODO: investigating changing earlier-generated path, as situation might have changed
+        }
 
         // wait a few seconds between lane changes to allow forward progress in the new lane
-        if ((carState.speed>10) && (std::chrono::duration_cast<std::chrono::seconds>(now-safe_time_).count() > 0)) {
+        const auto now = std::chrono::steady_clock::now();
+        if ((carState.speed>5) && (std::chrono::duration_cast<std::chrono::seconds>(now-safe_time_).count() > 0)) {
             // move to the middle lane when possible
             if (lane_ != 2) {
-                const Points points = changeLine(carState, 2);
-                if (points.size() > 0) {
+                if (const Points points = changeLine(carState, 2)) {
                     return points;
                 }
             }
@@ -580,15 +602,13 @@ public:
             if (carState.speed < road_.TARGET_SPEED-3) {
                 // when driving is slow: switch to the left lane to pass
                 if (lane_ != 1) {
-                    const Points points = changeLine(carState, lane_-1);
-                    if (points.size() > 0) {
+                    if (const Points points = changeLine(carState, lane_-1)) {
                         return points;
                     }
                 }
                 // otherwise: switch to the right lane to pass
                 if (lane_ != 3) {
-                    const Points points = changeLine(carState, lane_+1);
-                    if (points.size() > 0) {
+                    if (const Points points = changeLine(carState, lane_+1)) {
                         return points;
                     }
                 }
@@ -602,38 +622,35 @@ public:
     // keep the current lane in xy coordinates
     Points keepLineXY(const CarState& carState, const int lane) {
         // go from the current state to state with the same d, s+10, speed : 10
-        double T = 1.5;                // reach the target speed within this time
-        const int count      = T/TICK; // how many points?
-        const double MAX_ACC = 3.5;    // do not exceed this acceleration
+        double T = 1.3;                // reach the target speed within this time
+        const double MAX_ACC = 2.5;    // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED; // approach this speed
 
         // try trajectories
         for (int i=0; i<20; ++i, T += 0.1, targetSpeed -= 0.5) {
             // use previously generated points, when present
-            Points points = carState.previous_pathXY;
-            if (points.size()>count/2) {
-                return points; // keep following the earlier generated path
-            }
+            const Points points = carState.previous_pathXY;
 
             // generate start and end points of the trajectory
             StartEnd startEnd(road_, carState, points, TICK, road_.lineCenter(lane));
             
             // can we reach the destination at the targetSpeed within the max acceleration?
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
-            
+
             // reduce the speed if there is a car in front
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s, road_);
-            if (other.isValid()) {
-                const double SAFE_TIME = 2.5;
-                const double s = other.predictS(T-SAFE_TIME);
-                if (s < startEnd.endS) {
-                    // reduce the speed to the speed of the car in front. weighed average
-                    startEnd.setMaxSpeed(road_, (startEnd.startXY_dot.abs()+2*other.speedXY.abs())/3-2, MAX_ACC, T);
-                }
+            const double SAFE_TIME = 2;
+            if (OtherCar other = nearestFrontCar(carState, lane, carState.s, startEnd.endS, T-1)) {
+                // a car is too close: break
+                startEnd.setMaxSpeed(road_, startEnd.startXY_dot.abs()/4, MAX_ACC, T);
+                //cout << "breaking from " << startEnd.startXY_dot.abs() << ", to " << startEnd.startXY_dot.abs()/2 << ", state: " << carState << ", other: " << other << endl;
+            }   else if (OtherCar other = nearestFrontCar(carState, lane, carState.s, startEnd.endS, T-SAFE_TIME)) {
+                // reduce the speed to the average of our speed and the speed of the car in front
+                const double speed = (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-1;
+                //cout << "slowing from " << startEnd.startXY_dot.abs() << ", to " << speed << ", state: " << carState << ", other: " << other << endl;
+                startEnd.setMaxSpeed(road_, speed, MAX_ACC, T);
             }
 
-            const Points res = buildTrajectory(points, startEnd, T);
-            if (res.size()) {
+            if (const Points res = buildTrajectory(points, startEnd, T)) {
                 return res;
             }
         }
@@ -643,32 +660,44 @@ public:
     }
 
     Points changeLine(const CarState& carState, const int lane) {
-        double T = 1.5;             // reach the target speed within this time
-        const double MAX_ACC = 3; // do not exceed this acceleration
-        double targetSpeed   = road_.TARGET_SPEED;
+        double T = 1.3;           // reach the target speed within this time
+        const double MAX_ACC = 2; // do not exceed this acceleration
+        double targetSpeed   = road_.TARGET_SPEED+1;
 
         // try trajectories
         for (int i=0; i<10; ++i, T += 0.1, targetSpeed -= 0.3) {
-            Points points = carState.previous_pathXY;
+            const Points points = carState.previous_pathXY;
 
             StartEnd startEnd   (road_, carState, points, TICK, (carState.d + road_.lineCenter(lane))/2);
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
 
             // don't change the lane if the target lane is occupied
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s-15, road_);
-            if (other.isValid()) {
-                const double SAFE_TIME = 2;
-                const double s = other.predictS(T-SAFE_TIME);
-                if (s < startEnd.endS) {
-                    return {}; // another car is too close
-                }
+            const double SAFE_TIME = 2;
+            if (nearestFrontCar(carState, lane_, carState.s-5, startEnd.endS, T-1).isValid() ||
+                nearestFrontCar(carState, lane , carState.s-5, startEnd.endS, T-SAFE_TIME).isValid()) {
+                return {}; // another car is too close
             }
 
-            lane_      = lane;
-            safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(4);
-            
-            const Points res = buildTrajectory(points, startEnd, T);
-            if (res.size()) {
+            if (const Points res = buildTrajectory(points, startEnd, T)) {
+                // if a car behind us in the target lane is too close - abort lane change
+                if (const OtherCar behind = carState.nearestBehindCar(lane, carState.s, road_)) {
+                    for (size_t i=0; i<res.size(); ++i) {
+                        const double behindS = behind.predictS(i*TICK);
+                        const double behindD = road_.lineCenter(lane);
+                        const Point currXY   = res[i];
+                        const Point behindXY = road_.getXY(behindS, behindD);
+                        if ((currXY-behindXY).abs() < 10) {
+                            //cout << "aborted line change " << i << ", " << currXY << ", car: " << behindXY << endl;
+                            return {};
+                        }   else {
+                            //cout << "safe line change " << i << ", " << currXY << ", car: " << behindXY << ", dist: " << (currXY-behindXY).abs() << endl;
+                        }
+                    }
+                    //cout << endl;
+                }
+
+                lane_      = lane;
+                safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
                 return res;
             }
         }
@@ -676,14 +705,9 @@ public:
     }
 
     Points buildTrajectory(Points points, const StartEnd &startEnd, const double T) {
-        const int  count   = T/TICK;
+        const int  count        = T/TICK;
         const Polynomial poly_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const Polynomial poly_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
-        
-        //cout << poly_x << endl;
-        //cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
-        //cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
-        //cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
 
         Point lastXY    = startEnd.startXY;
         Point lastSpeed = startEnd.startXY_dot;
@@ -691,13 +715,10 @@ public:
             const Point currXY = {poly_x(t), poly_y(t) };
             const Point speed  = (currXY-lastXY) / TICK;
             const Point acc    = (speed-lastSpeed) / TICK;
-            if ((speed.abs() > road_.TARGET_SPEED+1)) {
-                cout << "TOO FAST: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+            if ((speed.abs() > road_.TARGET_SPEED+1.5)/* || (acc.abs()>4)*/) {
+                //cout << "TOO FAST: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << road_.mps2mph(acc.abs()) << ", " << t << endl;
                 return {}; // reject this trajectory
             }
-
-            //cout << "POINT: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
-            cout << speed.abs() << ", " << road_.mps2mph(speed.abs()) << ", " << acc.abs() << endl;
 
             points.push(currXY);
             lastXY    = currXY;
@@ -706,8 +727,30 @@ public:
         return points;
     }
 private:
+    void init(const CarState& carState) {
+        if (lane_ >= 0) {
+            return;
+        }
+        
+        // find out which lane we are in on start
+        lane_ = 1 + (carState.d / road_.LANE_WIDTH);
+
+        // this prevents from changing lane on start
+        safe_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    }
+
+    OtherCar nearestFrontCar(const CarState &carState, const int lane, const double s, const double endS, const double t) const {
+        if (const OtherCar other = carState.nearestFrontCar(lane, s, road_)) {
+            const double otherS = other.predictS(t);
+            if (otherS < endS) {
+                return other;
+            }
+        }
+        return OtherCar::createInvalid();
+    }
+
     Road road_;
-    int lane_ = 2; // apparently the simulator always starts in lane 2
+    int lane_ = -1; // find the initial lane in init()
     std::chrono::time_point<std::chrono::steady_clock> safe_time_ = std::chrono::steady_clock::now();
 };
 
@@ -792,4 +835,3 @@ int main() {
   }
   h.run();
 }
-
