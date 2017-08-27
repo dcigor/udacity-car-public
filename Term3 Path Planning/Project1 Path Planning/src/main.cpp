@@ -223,14 +223,25 @@ struct Point {
         return {x-b.x, y-b.y};
     }
     
+    Point operator*(const double &b) const {
+        return {x*b, y*b};
+    }
+
     Point operator/(const double &b) const {
         return {x/b, y/b};
     }
     
+    // absolute value of the distance of the point from the origin (aka length of the vector)
     double abs() const {
         return sqrt(x*x+y*y);
     }
-    
+
+    // normalized vector: same direction, but unit length
+    Point norm() const {
+        const double magnitude = abs();
+        return {x/magnitude, y/magnitude};
+    }
+
     friend ostream& operator<<(ostream& os, const Point& p) {
         os << "{" << p.x << ", " << p.y << ", |" << p.abs() <<"|}";
         return os;
@@ -289,7 +300,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 47;
+    const double TARGET_SPEED_MPH = 47.5;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -457,6 +468,8 @@ public:
 
     // update the end point to make sure it can be reached given the speed and acceleration
     void setMaxSpeed(const Road &road, const double maxSpeed, const double maxAcc, const double T) {
+        targetEndSpeed_ = maxSpeed;
+        max_acc_        = maxAcc;
         desiredEndSpeed = min(desiredEndSpeed, maxSpeed); // keep reducing speed with each additional restriction
         endS            = startS + desiredEndSpeed * T;
 
@@ -485,19 +498,23 @@ public:
 
             endXY = road.getXY(endS, endD);
             const auto endXY_prev = road.getXY(endS_prev, endD);
-            const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
-            
-            endXY_dot  = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
+            //const double endYaw   = atan2(endXY.y-endXY_prev.y, endXY.x-endXY_prev.x);
+            const double endYaw   = atan2(endXY.y-startXY.y, endXY.x-startXY.x);
 
+            endXY_dot = {desiredEndSpeed * cos(endYaw), desiredEndSpeed * sin(endYaw)};
+
+            if (abs(desiredEndSpeed-targetEndSpeed_) > 1) {
+                endXY_dot_dot = (endXY_dot-startXY_dot).norm() * max_acc_;
+            }
+            /*
             if (endXY_dot.abs() < startXY_dot.abs()) {
                 // slowing down?
                 endXY_dot_dot = (endXY_dot-startXY_dot) / T / 2;
             }   else {
                 // accelerating
-                if (endXY_dot.abs() < desiredEndSpeed-3) {
-                    endXY_dot_dot = (endXY_dot-startXY_dot) / T;
-                }
+                endXY_dot_dot = (endXY_dot-startXY_dot).norm() * max_acc_;
             }
+             */
         }
     }
 
@@ -507,9 +524,10 @@ public:
     Point endXY, endXY_dot, endXY_dot_dot = {0,0};
 
     double startS, startD;
-    double desiredEndSpeed;
+    double desiredEndSpeed, targetEndSpeed_;
     double endS, endD;
 private:
+    double max_acc_ = 0;
     const double TICK_;
 };
 
@@ -586,7 +604,7 @@ public:
         // go from the current state to state with the same d, s+10, speed : 10
         double T = 1.5;                // reach the target speed within this time
         const int count      = T/TICK; // how many points?
-        const double MAX_ACC = 3;    // do not exceed this acceleration
+        const double MAX_ACC = 3.5;    // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED; // approach this speed
 
         // try trajectories
@@ -625,22 +643,21 @@ public:
     }
 
     Points changeLine(const CarState& carState, const int lane) {
-        double T = 2;             // reach the target speed within this time
-        const double MAX_ACC = 2; // do not exceed this acceleration
+        double T = 1.5;             // reach the target speed within this time
+        const double MAX_ACC = 3; // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED;
 
         // try trajectories
         for (int i=0; i<10; ++i, T += 0.1, targetSpeed -= 0.3) {
             Points points = carState.previous_pathXY;
 
-            StartEnd startEnd   (road_, carState, points, TICK, road_.lineCenter(lane));
+            StartEnd startEnd   (road_, carState, points, TICK, (carState.d + road_.lineCenter(lane))/2);
             startEnd.setMaxSpeed(road_, targetSpeed, MAX_ACC, T);
-            startEnd.setMaxEndS (road_, startEnd.endS-road_.LANE_WIDTH/2, T);
 
             // don't change the lane if the target lane is occupied
-            const OtherCar other = carState.nearestFrontCar(lane, carState.s-20, road_);
+            const OtherCar other = carState.nearestFrontCar(lane, carState.s-15, road_);
             if (other.isValid()) {
-                const double SAFE_TIME = 2.5;
+                const double SAFE_TIME = 2;
                 const double s = other.predictS(T-SAFE_TIME);
                 if (s < startEnd.endS) {
                     return {}; // another car is too close
@@ -663,10 +680,10 @@ public:
         const Polynomial poly_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const Polynomial poly_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
         
-        cout << poly_x << endl;
-        cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
-        cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
-        cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
+        //cout << poly_x << endl;
+        //cout << "START s:" << startEnd.startS << ", " << startEnd.startXY << ", Speed: " << startEnd.startXY_dot << ", A: " << startEnd.startXY_dot_dot << ", " << startEnd.startXY_dot_dot.abs() << ", end: " << startEnd.endXY << endl;
+        //cout << "D S: " << startEnd.endS - startEnd.startS << ", dxy: " << (startEnd.endXY-startEnd.startXY).abs() << ", speed: " << (startEnd.endS - startEnd.startS)/T << ", mph: " << Road::mps2mph((startEnd.endS - startEnd.startS)/T) << endl;
+        //cout << "PT: " << road_.getXY(startEnd.startS, startEnd.startD) << " -> " << road_.getXY(startEnd.endS, startEnd.endD) << ", D: " << (road_.getXY(startEnd.startS, startEnd.startD)-road_.getXY(startEnd.endS, startEnd.endD)).abs() << endl;
 
         Point lastXY    = startEnd.startXY;
         Point lastSpeed = startEnd.startXY_dot;
@@ -679,7 +696,8 @@ public:
                 return {}; // reject this trajectory
             }
 
-            cout << "POINT: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+            //cout << "POINT: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << endl;
+            cout << speed.abs() << ", " << road_.mps2mph(speed.abs()) << ", " << acc.abs() << endl;
 
             points.push(currXY);
             lastXY    = currXY;
