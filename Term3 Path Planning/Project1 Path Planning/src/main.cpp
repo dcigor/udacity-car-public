@@ -1,3 +1,5 @@
+// Copyright (c) 2017 idia
+
 #include <fstream>
 #include <math.h>
 #include <uWS/uWS.h>
@@ -308,7 +310,7 @@ public:
     static double mps2mph(const double mps) {
         return mps / 1609 * 3600;
     }
-    const double TARGET_SPEED_MPH = 46.5;
+    const double TARGET_SPEED_MPH = 47.5;
     const double TARGET_SPEED     = mph2mps(TARGET_SPEED_MPH);
 
     const double LANE_WIDTH = 4;
@@ -637,7 +639,7 @@ public:
     // keep the current lane in xy coordinates
     Points keepLine(const CarState& carState,
                     double T = 1.3,      // reach the target speed within this time
-                    const double MAX_ACC = 2.5) { // do not exceed this acceleration
+                    const double MAX_ACC = 3) { // do not exceed this acceleration
         double targetSpeed = road_.TARGET_SPEED; // approach this speed
         // try trajectories
         for (int i=0; i<20; ++i, T += 0.1, targetSpeed -= 0.5) {
@@ -655,7 +657,7 @@ public:
             if (OtherCar other = nearestFrontCar(carState, lane_, carState.s, startEnd.endS, T-1)) {
                 // a car is too close: break
                 startEnd.setMaxSpeed(road_, startEnd.startXY_dot.abs()/4, MAX_ACC, T);
-                //cout << "breaking from " << startEnd.startXY_dot.abs() << ", to " << startEnd.startXY_dot.abs()/2 << ", state: " << carState << ", other: " << other << endl;
+                //cout << "breaking from " << startEnd.startXY_dot.abs() << ", to " << startEnd.startXY_dot.abs()/4 << ", state: " << carState << ", other: " << other << endl;
             }   else if (OtherCar other = nearestFrontCar(carState, lane_, carState.s, startEnd.endS, T-SAFE_TIME)) {
                 // reduce the speed to the average of our speed and the speed of the car in front
                 const double speed = (startEnd.startXY_dot.abs()+other.speedXY.abs())/2-1;
@@ -673,8 +675,8 @@ public:
     }
 
     Points changeLine(const CarState& carState, const int lane) {
-        double T = 1.3;           // reach the target speed within this time
-        const double MAX_ACC = 2; // do not exceed this acceleration
+        double T = 1.3;             // reach the target speed within this time
+        const double MAX_ACC = 2.5; // do not exceed this acceleration
         double targetSpeed   = road_.TARGET_SPEED+1;
 
         // try trajectories
@@ -699,7 +701,7 @@ public:
                         const double behindD = road_.lineCenter(lane);
                         const Point currXY   = res[i];
                         const Point behindXY = road_.getXY(behindS, behindD);
-                        if ((currXY-behindXY).abs() < 10) {
+                        if ((currXY-behindXY).abs() < 15) {
                             //cout << "aborted line change " << i << ", " << currXY << ", car: " << behindXY << endl;
                             return {};
                         }   else {
@@ -722,7 +724,7 @@ public:
         const Polynomial poly_x = JMT({startEnd.startXY.x, startEnd.startXY_dot.x, startEnd.startXY_dot_dot.x}, {startEnd.endXY.x, startEnd.endXY_dot.x, startEnd.endXY_dot_dot.x}, T);
         const Polynomial poly_y = JMT({startEnd.startXY.y, startEnd.startXY_dot.y, startEnd.startXY_dot_dot.y}, {startEnd.endXY.y, startEnd.endXY_dot.y, startEnd.endXY_dot_dot.y}, T);
 
-        cout << "POLY " << poly_x << ", " << poly_y << ", SE: " << startEnd << endl;
+        //cout << "POLY " << poly_x << ", " << poly_y << ", SE: " << startEnd << endl;
         
         Point lastXY    = startEnd.startXY;
         Point lastSpeed = startEnd.startXY_dot;
@@ -730,12 +732,12 @@ public:
             const Point currXY = {poly_x(t), poly_y(t) };
             const Point speed  = (currXY-lastXY) / TICK;
             const Point acc    = (speed-lastSpeed) / TICK;
-            if ((speed.abs() > road_.TARGET_SPEED+1.5)/* || (acc.abs()>4)*/) {
+            if ((speed.abs() > road_.TARGET_SPEED+1)/* || (acc.abs()>4)*/) {
                 //cout << "TOO FAST: " << currXY << ", Speed: " << speed << " mps, " << road_.mps2mph(speed.abs()) << " mph, acc: " << road_.mps2mph(acc.abs()) << ", " << t << endl;
                 return {}; // reject this trajectory
             }
 
-            cout << "POINT " << t << currXY << ", speed: " << speed << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << road_.mps2mph(acc.abs()) << endl;
+            //cout << "POINT " << t << currXY << ", speed: " << speed << road_.mps2mph(speed.abs()) << " mph, acc: " << acc << road_.mps2mph(acc.abs()) << endl;
 
             points.push(currXY);
             lastXY    = currXY;
