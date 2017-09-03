@@ -65,44 +65,37 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :param num_classes: Number of classes to classify
     :return: The Tensor for the last layer of output
     """
-    #udacity suggestion
-    vgg_layer7 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='SAME', 
-                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-
+    reg = tf.contrib.layers.l2_regularizer(0.001)
+    ini = tf.contrib.layers.variance_scaling_initializer()
+    
+    vgg_layer7 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='SAME', kernel_initializer=ini, kernel_regularizer=reg)
+    
     # similar for vgg_layer4 and vgg_layer3 taking the corresponding vgg_layer4_out and vgg_layer3_out
-    vgg_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='SAME', 
-                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-    vgg_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='SAME', 
-                                  kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
-
+    vgg_layer4 = tf.layers.conv2d(vgg_layer4_out, num_classes, 1, padding='SAME', kernel_initializer=ini, kernel_regularizer=reg)
+    vgg_layer3 = tf.layers.conv2d(vgg_layer3_out, num_classes, 1, padding='SAME', kernel_initializer=ini, kernel_regularizer=reg)
+    
     #7
-    fcn_layer7 = tf.layers.conv2d_transpose(vgg_layer7, num_classes, 4, 2, 'SAME',
-                                          kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    fcn_layer7 = tf.layers.conv2d_transpose(vgg_layer7, num_classes, 4, 2, 'SAME', kernel_initializer=ini, kernel_regularizer=reg)
     
     #4
-    fcn_layer4 = tf.layers.conv2d_transpose(fcn_layer7, num_classes, 4, 2, 'SAME',
-                                            kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    fcn_layer4 = tf.layers.conv2d_transpose(fcn_layer7, num_classes, 4, 2, 'SAME', kernel_initializer=ini, kernel_regularizer=reg)
     combined_layer4 = tf.add(vgg_layer4, fcn_layer7)
     
     #3
-    fcn_layer3 = tf.layers.conv2d_transpose(combined_layer4, num_classes, 4, 2, 'SAME',
-                                            kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    fcn_layer3 = tf.layers.conv2d_transpose(combined_layer4, num_classes, 4, 2, 'SAME', kernel_initializer=ini, kernel_regularizer=reg)
     combined_layer3 = tf.add(vgg_layer3, fcn_layer3)
-    output = tf.layers.conv2d_transpose(combined_layer3, num_classes, 16, 8, 'SAME',                                               
-                                        kernel_initializer=tf.truncated_normal_initializer(stddev = 0.01))
+    output = tf.layers.conv2d_transpose(combined_layer3, num_classes, 16, 8, 'SAME', kernel_initializer=ini, kernel_regularizer=reg)
     return output
-                                    
-tests.test_layers(layers)
 
 def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     """
-        Build the TensorFLow loss and optimizer operations.
-        :param nn_last_layer: TF Tensor of the last layer in the neural network
-        :param correct_label: TF Placeholder for the correct label image
-        :param learning_rate: TF Placeholder for the learning rate
-        :param num_classes: Number of classes to classify
-        :return: Tuple of (logits, train_op, cross_entropy_loss)
-        """
+    Build the TensorFLow loss and optimizer operations.
+    :param nn_last_layer: TF Tensor of the last layer in the neural network
+    :param correct_label: TF Placeholder for the correct label image
+    :param learning_rate: TF Placeholder for the learning rate
+    :param num_classes: Number of classes to classify
+    :return: Tuple of (logits, train_op, cross_entropy_loss)
+    """
     # TODO: Implement function
     logits = tf.reshape(nn_last_layer, (-1, num_classes))
     optimizer = tf.train.AdamOptimizer(learning_rate)
@@ -114,29 +107,39 @@ tests.test_optimize(optimize)
 def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
              correct_label, keep_prob, learning_rate):
     """
-        Train neural network and print out the loss during training.
-        :param sess: TF Session
-        :param epochs: Number of epochs
-        :param batch_size: Batch size
-        :param get_batches_fn: Function to get batches of training data.  Call using get_batches_fn(batch_size)
-        :param train_op: TF Operation to train the neural network
-        :param cross_entropy_loss: TF Tensor for the amount of loss
-        :param input_image: TF Placeholder for input images
-        :param correct_label: TF Placeholder for label images
-        :param keep_prob: TF Placeholder for dropout keep probability
-        :param learning_rate: TF Placeholder for learning rate
-        """
+    Train neural network and print out the loss during training.
+    :param sess: TF Session
+    :param epochs: Number of epochs
+    :param batch_size: Batch size
+    :param get_batches_fn: Function to get batches of training data.  Call using get_batches_fn(batch_size)
+    :param train_op: TF Operation to train the neural network
+    :param cross_entropy_loss: TF Tensor for the amount of loss
+    :param input_image: TF Placeholder for input images
+    :param correct_label: TF Placeholder for label images
+    :param keep_prob: TF Placeholder for dropout keep probability
+    :param learning_rate: TF Placeholder for learning rate
+    """
     # TODO: Implement function
     g_start_time = timer()
-    print(1)
     for epoch in range(epochs):
         for batch_x, batch_y in get_batches_fn(batch_size):
-            print ("II:", input_image, "BX:", batch_x.shape, len(batch_x), "CL:", correct_label, "BY:", batch_y.shape, len(batch_y))
-            sess.run(train_op, feed_dict = \
-                     {input_image: batch_x, correct_label: batch_y, \
-                     keep_prob: 0.5, learning_rate: 0.1})
-            print("    Epoch: ", epoch+1, "   %.2f Hours" % ((timer()-g_start_time)/3600.))
-
+            res = sess.run(train_op, feed_dict = \
+                           {input_image: batch_x, correct_label: batch_y, \
+                           keep_prob: 0.5, learning_rate: 0.000001})
+                
+                           res = sess.run(cross_entropy_loss, feed_dict = \
+                                          {input_image: batch_x, correct_label: batch_y, \
+                                          keep_prob: 1, learning_rate: 0.000001})
+                           
+                           #correct_prediction = tf.equal(tf.argmax(batch_y,1), tf.argmax(correct_label,1))
+                           #accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+                           #res = sess.run(accuracy, feed_dict= \
+                           #         {input_image: batch_x, correct_label: batch_y, \
+                           #         keep_prob: 1, learning_rate: 0.1})
+                           #print("%.2f" % (100*res), end=",")
+            print("%.2f" % res, end=", ")
+        
+        print(" Epoch: ", epoch+1, " %.1f Minutes" % ((timer()-g_start_time)/60.))
 
 def run():
     num_classes = 2
@@ -172,15 +175,15 @@ def run():
         sess.run(tf.global_variables_initializer())
         
         # TODO: Train NN using the train_nn function
-        epochs = 1
-        batch_size = 1
+        epochs = 400
+        batch_size = 30 #40 leads to out-of-memory
         train_nn(sess, epochs, batch_size, get_batches_fn, train_op, loss_op, input_image,
                  correct_label, keep_prob, learning_rate)
+                 
+                 # TODO: Save inference data using helper.save_inference_samples
+        helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
 
-# TODO: Save inference data using helper.save_inference_samples
-#  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
-
-# OPTIONAL: Apply the trained model to a video
+        # OPTIONAL: Apply the trained model to a video
 
 if __name__ == '__main__':
     run()
