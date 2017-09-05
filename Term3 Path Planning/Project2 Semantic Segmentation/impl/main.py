@@ -56,7 +56,7 @@ def load_vgg(sess, vgg_path):
         g.get_tensor_by_name(vgg_layer7_out_tensor_name)
 tests.test_load_vgg(load_vgg, tf)
 
-def con(layer, num_classes):
+def conv(layer, num_classes):
     reg = tf.contrib.layers.l2_regularizer(0.001)
     ini = tf.truncated_normal_initializer(stddev=0.01)
     return tf.layers.conv2d(layer, num_classes, 1, padding='same',
@@ -77,22 +77,17 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :param num_classes: Number of classes to classify
     :return: The Tensor for the last layer of output
     """
-    conv7 = con(vgg_layer7_out, num_classes)
+    conv7  = conv(vgg_layer7_out, num_classes) # [?,5,18,2]
+    conv4  = conv(vgg_layer4_out, num_classes) # [?,10,36,2]
+    conv3  = conv(vgg_layer3_out, num_classes) # [?,20,72,2]
     
-    conv4 = con(vgg_layer4_out, num_classes)
-    vgg_layer3 = con(vgg_layer3_out, num_classes)
+    tran7  = tran  (conv7, num_classes, 4, 2) # [?,5,18,2] -> [?,10,36,2]
+    comb_a = tf.add(tran7, conv4) # [?,10,36,2]
     
-    #7
-    fcn_layer7 = tran(conv7, num_classes, 4, 2)
+    tran4  = tran  (comb_a, num_classes, 4, 2) # [?,10,36,2] -> [?,20,72,2]
+    comb_b = tf.add(tran4, conv3) # [?,20,72,2]
     
-    #4
-    fcn_layer4 = tran(fcn_layer7, num_classes, 4, 2)
-    combined_layer4 = tf.add(conv4, fcn_layer7)
-    
-    #3
-    fcn_layer3 = tran(combined_layer4, num_classes, 4, 2)
-    combined_layer3 = tf.add(vgg_layer3, fcn_layer3)
-    output = tran(combined_layer3, num_classes, 16, 8)
+    output = tran(comb_b, num_classes, 16, 8) # [?,20,72,2] -> [?,160,576,2]
     return output
 
 def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
@@ -127,21 +122,17 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     :param keep_prob: TF Placeholder for dropout keep probability
     :param learning_rate: TF Placeholder for learning rate
     """
-    # TODO: Implement function
-    g_start_time = timer()
+    start_time = timer()
     for epoch in range(epochs):
+        print("Loss:", end=" ")
         for batch_x, batch_y in get_batches_fn(batch_size):
-            res = sess.run(train_op, feed_dict = \
-                           {input_image: batch_x, correct_label: batch_y, \
-                           keep_prob: 0.5, learning_rate: 0.000001})
-                
-            res = sess.run(cross_entropy_loss, feed_dict = \
-                                          {input_image: batch_x, correct_label: batch_y, \
-                                          keep_prob: 1, learning_rate: 0.000001})
-
-            print("%.2f" % res, end=", ")
+            _, res = sess.run([train_op, cross_entropy_loss], feed_dict = \
+                              {input_image: batch_x, correct_label: batch_y, \
+                              keep_prob: 0.5, learning_rate: 0.00005})
+                              #example: learning_rate 0.00001, 300 epochs result in 0.020 loss
+            print("%.3f" % res, end=" ")
         
-        print(" Epoch: ", epoch+1, " %.1f Minutes" % ((timer()-g_start_time)/60.))
+        print("Epoch:", epoch+1, " %.1f Minutes" % ((timer()-start_time)/60.))
 
 def run():
     num_classes = 2
@@ -158,9 +149,6 @@ def run():
     #  https://www.cityscapes-dataset.com/
     
     with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        sess.run(tf.local_variables_initializer())
-
         # Path to vgg model
         vgg_path = os.path.join(data_dir, 'vgg')
         # Create function to get batches
@@ -177,9 +165,11 @@ def run():
         out_layer = layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes)
         logits, train_op, loss_op = optimize(out_layer, correct_label, learning_rate, num_classes)
         
+        sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
+        
         # TODO: Train NN using the train_nn function
-        epochs = 4
-        batch_size = 30 #40 leads to out-of-memory
+        epochs = 80
+        batch_size = 25 #40 leads to out-of-memory
         train_nn(sess, epochs, batch_size, get_batches_fn, train_op, loss_op, input_image,
                  correct_label, keep_prob, learning_rate)
                  
@@ -190,3 +180,4 @@ def run():
 
 if __name__ == '__main__':
     run()
+
